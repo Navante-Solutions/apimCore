@@ -59,19 +59,20 @@ type TrafficPacket struct {
 }
 
 type Model struct {
-	Uptime        time.Time
-	TotalRequests int64
-	AvgLatency    float64
-	Logs          []string
-	Traffic       []TrafficPacket
-	Mode          ViewMode
-	ShowMenu      bool
-	Viewport      viewport.Model
-	TrafficTable  table.Model
-	Ready         bool
-	TermWidth     int
-	TermHeight    int
-	OnReload      func()
+	Uptime         time.Time
+	TotalRequests  int64
+	AvgLatency     float64
+	Logs           []string
+	Traffic        []TrafficPacket
+	Mode           ViewMode
+	ShowMenu       bool
+	Viewport       viewport.Model
+	TrafficTable   table.Model
+	Ready          bool
+	TermWidth      int
+	TermHeight     int
+	OnReload       func()
+	SelectedPacket *TrafficPacket
 }
 
 func NewModel(onReload func()) Model {
@@ -132,8 +133,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			if m.Mode == DashboardMode {
 				m.Mode = TrafficMode
+				m.TrafficTable.Focus()
 			} else {
 				m.Mode = DashboardMode
+				m.TrafficTable.Blur()
 			}
 		case "r":
 			if m.ShowMenu {
@@ -146,11 +149,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "t":
 			if m.ShowMenu {
 				m.Mode = TrafficMode
+				m.TrafficTable.Focus()
 				m.ShowMenu = false
 			}
 		case "d":
 			if m.ShowMenu {
 				m.Mode = DashboardMode
+				m.TrafficTable.Blur()
+				m.ShowMenu = false
+			}
+		case "enter":
+			if m.Mode == TrafficMode && !m.ShowMenu {
+				curr := m.TrafficTable.SelectedRow()
+				if len(curr) > 0 {
+					// Toggle details by clicking enter on a row
+					idx := m.TrafficTable.Cursor()
+					if idx >= 0 && idx < len(m.Traffic) {
+						m.SelectedPacket = &m.Traffic[idx]
+					}
+				}
+			}
+		case "esc":
+			if m.SelectedPacket != nil {
+				m.SelectedPacket = nil
+			} else if m.ShowMenu {
 				m.ShowMenu = false
 			}
 		case "c":
@@ -159,6 +181,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.AvgLatency = 0
 				m.Traffic = nil
 				m.TrafficTable.SetRows(nil)
+				m.SelectedPacket = nil
 				m.Logs = append(m.Logs, infoStyle.Render("Metrics and Traffic cleared"))
 				m.ShowMenu = false
 			}
@@ -168,6 +191,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.TermWidth = msg.Width
 		m.TermHeight = msg.Height
 		headerHeight := 10
+		if m.TermHeight <= headerHeight {
+			headerHeight = m.TermHeight / 2
+		}
+
 		if !m.Ready {
 			m.Viewport = viewport.New(msg.Width, msg.Height-headerHeight)
 			m.Viewport.SetContent(strings.Join(m.Logs, "\n"))
@@ -176,15 +203,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Viewport.Width = msg.Width
 			m.Viewport.Height = msg.Height - headerHeight
 		}
+		m.TrafficTable.SetWidth(msg.Width)
 		m.TrafficTable.SetHeight(msg.Height - headerHeight - 2)
 
 	case LogMsg:
 		m.Logs = append(m.Logs, string(msg))
-		if len(m.Logs) > 500 {
-			m.Logs = m.Logs[len(m.Logs)-500:]
+		if len(m.Logs) > 1000 {
+			m.Logs = m.Logs[len(m.Logs)-1000:]
 		}
 		m.Viewport.SetContent(strings.Join(m.Logs, "\n"))
-		m.Viewport.GotoBottom()
+		if m.Viewport.AtBottom() {
+			m.Viewport.GotoBottom()
+		}
 
 	case TrafficPacket:
 		m.Traffic = append(m.Traffic, msg)
@@ -247,6 +277,24 @@ func (m Model) View() string {
 		body = m.Viewport.View()
 	} else {
 		body = m.TrafficTable.View()
+		if m.SelectedPacket != nil {
+			details := lipgloss.NewStyle().
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(lipgloss.Color("63")).
+				Padding(1).
+				Width(m.TermWidth - 4).
+				Render(fmt.Sprintf(
+					"PACKET DETAILS\n\nMethod: %s\nPath: %s\nBackend: %s\nStatus: %d\nLatency: %dms\nTenant: %s\nTime: %s",
+					m.SelectedPacket.Method,
+					m.SelectedPacket.Path,
+					m.SelectedPacket.Backend,
+					m.SelectedPacket.Status,
+					m.SelectedPacket.Latency,
+					m.SelectedPacket.TenantID,
+					m.SelectedPacket.Timestamp.Format(time.RFC3339),
+				))
+			body = lipgloss.JoinVertical(lipgloss.Left, body, details)
+		}
 	}
 
 	view := header + "\n" + body
