@@ -3,8 +3,9 @@ package meter
 import (
 	"time"
 
-	"github.com/navantesolutions/apimcore/internal/store"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/navantesolutions/apimcore/internal/store"
 )
 
 type Meter struct {

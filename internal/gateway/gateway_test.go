@@ -5,10 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/navantesolutions/apimcore/config"
 	"github.com/navantesolutions/apimcore/internal/meter"
 	"github.com/navantesolutions/apimcore/internal/store"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestGateway_ServeHTTP(t *testing.T) {

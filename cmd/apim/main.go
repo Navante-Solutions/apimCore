@@ -8,14 +8,15 @@ import (
 	"os"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/navantesolutions/apimcore/config"
 	"github.com/navantesolutions/apimcore/internal/admin"
 	"github.com/navantesolutions/apimcore/internal/devportal"
 	"github.com/navantesolutions/apimcore/internal/gateway"
 	"github.com/navantesolutions/apimcore/internal/meter"
 	"github.com/navantesolutions/apimcore/internal/store"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 //go:embed all:web/devportal
