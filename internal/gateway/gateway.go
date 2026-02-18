@@ -22,20 +22,32 @@ const (
 	HeaderRequestID = "X-Request-Id"
 )
 
+type TrafficPacket struct {
+	Timestamp time.Time
+	Method    string
+	Path      string
+	Backend   string
+	Status    int
+	Latency   int64
+	TenantID  string
+}
+
 type Gateway struct {
-	mu     sync.RWMutex
-	config *config.Config
-	store  *store.Store
-	meter  *meter.Meter
-	proxy  *httputil.ReverseProxy
+	mu          sync.RWMutex
+	config      *config.Config
+	store       *store.Store
+	meter       *meter.Meter
+	proxy       *httputil.ReverseProxy
+	TrafficChan chan TrafficPacket
 }
 
 func New(cfg *config.Config, s *store.Store, m *meter.Meter) *Gateway {
 	return &Gateway{
-		config: cfg,
-		store:  s,
-		meter:  m,
-		proxy:  &httputil.ReverseProxy{},
+		config:      cfg,
+		store:       s,
+		meter:       m,
+		proxy:       &httputil.ReverseProxy{},
+		TrafficChan: make(chan TrafficPacket, 100),
 	}
 }
 
@@ -142,6 +154,22 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		tenantID = sub.TenantID
 	}
 	g.meter.Record(backendName, targetApi.PathPrefix, r.Method, rec.status, elapsed, subID, apiDefID, tenantID)
+
+	// Emit traffic packet for TUI
+	select {
+	case g.TrafficChan <- TrafficPacket{
+		Timestamp: start,
+		Method:    r.Method,
+		Path:      path,
+		Backend:   backendName,
+		Status:    rec.status,
+		Latency:   elapsed,
+		TenantID:  tenantID,
+	}:
+	default:
+		// Drop if channel full
+	}
+
 	log.Printf("apim gateway: %s %s -> %s %d %dms", r.Method, path, backendName, rec.status, elapsed)
 }
 

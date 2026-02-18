@@ -2,11 +2,15 @@ package main
 
 import (
 	"embed"
+	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -17,12 +21,27 @@ import (
 	"github.com/navantesolutions/apimcore/internal/gateway"
 	"github.com/navantesolutions/apimcore/internal/meter"
 	"github.com/navantesolutions/apimcore/internal/store"
+	"github.com/navantesolutions/apimcore/internal/tui"
 )
+
+type tuiWriter struct {
+	p *tea.Program
+}
+
+func (tw *tuiWriter) Write(p []byte) (n int, err error) {
+	if tw.p != nil {
+		tw.p.Send(tui.LogMsg(string(p)))
+	}
+	return len(p), nil
+}
 
 //go:embed all:web/devportal
 var devportalFS embed.FS
 
 func main() {
+	useTUI := flag.Bool("tui", false, "Enable interactive TUI monitor")
+	flag.Parse()
+
 	configPath := os.Getenv("APIM_CONFIG")
 	if configPath == "" {
 		configPath = "config.yaml"
@@ -88,8 +107,62 @@ func main() {
 		}
 	}()
 
-	log.Printf("apim server listening on %s (admin, devportal, metrics)", cfg.Server.Listen)
-	if err := http.ListenAndServe(cfg.Server.Listen, serverMux); err != nil {
-		log.Fatalf("server: %v", err)
+	if *useTUI {
+		var p *tea.Program
+		onReload := func() {
+			newCfg, err := config.Load(configPath)
+			if err == nil {
+				st.PopulateFromConfig(newCfg)
+				gw.UpdateConfig(newCfg)
+			}
+		}
+
+		tuiModel := tui.NewModel(onReload)
+		p = tea.NewProgram(tuiModel, tea.WithAltScreen())
+		log.SetOutput(&tuiWriter{p: p})
+
+		// Metrics updater
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			for range ticker.C {
+				statsTotal, _, _ := m.StatsSince(time.Now().Add(-1 * time.Hour))
+				p.Send(tui.MetricsUpdateMsg{
+					TotalRequests: statsTotal,
+					AvgLatency:    0, // TODO: calculate from mtr
+				})
+			}
+		}()
+
+		// Traffic stream
+		go func() {
+			for pkt := range gw.TrafficChan {
+				p.Send(tui.TrafficPacket{
+					Timestamp: pkt.Timestamp,
+					Method:    pkt.Method,
+					Path:      pkt.Path,
+					Backend:   pkt.Backend,
+					Status:    pkt.Status,
+					Latency:   pkt.Latency,
+					TenantID:  pkt.TenantID,
+				})
+			}
+		}()
+
+		go func() {
+			log.Printf("apim server listening on %s (admin, devportal, metrics)", cfg.Server.Listen)
+			if err := http.ListenAndServe(cfg.Server.Listen, serverMux); err != nil {
+				log.Fatalf("server: %v", err)
+			}
+		}()
+
+		if _, err := p.Run(); err != nil {
+			fmt.Printf("Error running TUI: %v", err)
+			os.Exit(1)
+		}
+	} else {
+		log.Printf("apim server listening on %s (admin, devportal, metrics)", cfg.Server.Listen)
+		if err := http.ListenAndServe(cfg.Server.Listen, serverMux); err != nil {
+			log.Fatalf("server: %v", err)
+		}
 	}
 }
