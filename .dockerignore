@@ -1,0 +1,16 @@
+.git
+.github
+*.md
+*.sum
+.env
+.env.*
+*.log
+Dockerfile*
+docker-compose*
+.dockerignore
+.gitignore
+apim
+*.exe
+tmp
+temp
+*.test

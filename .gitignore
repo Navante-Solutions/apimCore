@@ -1,0 +1,14 @@
+/apim
+/apim.exe
+*.test
+*.out
+vendor/
+.env
+.env.*
+*.log
+tmp/
+temp/
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,23 @@
+gateway:
+  listen: ":8080"
+
+server:
+  listen: ":8081"
+
+backends:
+  - path_prefix: /educore
+    target_url: http://localhost:8082
+    name: EduCore
+  - path_prefix: /integra
+    target_url: http://localhost:8083
+    name: IntegraCore
+  - path_prefix: /identity
+    target_url: http://localhost:8084
+    name: IdentityCore
+  - path_prefix: /campus
+    target_url: http://localhost:8085
+    name: CampusCore
+
+devportal:
+  enabled: true
+  path: /devportal

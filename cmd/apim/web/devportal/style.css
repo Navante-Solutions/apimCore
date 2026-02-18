@@ -1,0 +1,20 @@
+:root {
+  --bg: #0f1419;
+  --surface: #1a2332;
+  --border: #2d3a4d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui,sans-serif; background: var(--bg); color: var(--text); }
+.header { padding: 2rem; border-bottom: 1px solid var(--border); background: var(--surface); }
+.header p { margin: 0; color: var(--muted); }
+.main { max-width: 900px; margin: 0 auto; padding: 2rem; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem; }
+.card h2 { margin: 0 0 1rem 0; font-size: 1.1rem; color: var(--accent); }
+.card code { background: var(--bg); padding: 0.2em 0.4em; border-radius: 4px; }
+.item { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+.item strong { color: var(--accent); }
+.loading { color: var(--muted); }
+.err { color: #f85149; }

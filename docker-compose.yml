@@ -1,0 +1,20 @@
+services:
+  apim:
+    build: .
+    image: apimcore:local
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      - APIM_CONFIG=/etc/apim/config.yaml
+      - APIM_GATEWAY_LISTEN=:8080
+      - APIM_SERVER_LISTEN=:8081
+    volumes:
+      - ./config.yaml:/etc/apim/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped

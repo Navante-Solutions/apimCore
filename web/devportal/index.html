@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Navante API - Dev Portal</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="header">
+    <h1>Navante API</h1>
+    <p>Portal do desenvolvedor</p>
+  </header>
+  <main class="main">
+    <section class="card">
+      <h2>Produtos de API</h2>
+      <div id="products"></div>
+    </section>
+    <section class="card">
+      <h2>APIs disponiveis</h2>
+      <div id="apis"></div>
+    </section>
+    <section class="card">
+      <h2>Metricas de uso (24h)</h2>
+      <div id="usage"></div>
+    </section>
+    <section class="card">
+      <h2>Como usar</h2>
+      <p>Envie o header <code>X-Api-Key: sua-chave</code> nas requisicoes. Chaves via POST /api/admin/keys.</p>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
