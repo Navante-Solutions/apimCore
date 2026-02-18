@@ -18,11 +18,28 @@ var (
 			Background(lipgloss.Color("#7D56F4")).
 			Padding(0, 1)
 
+	headerLabelStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#7D56F4")).
+				Bold(true)
+
 	infoStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#04B575")).
 			Bold(true)
 
-	// Removed unused errorStyle to fix lint
+	statusStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#353535")).
+			Padding(0, 1)
+
+	footerKeyStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(lipgloss.Color("#AAAAAA")).
+			Padding(0, 1)
+
+	footerActionStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FAFAFA")).
+				Background(lipgloss.Color("#7D56F4")).
+				Padding(0, 1)
 
 	menuStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -31,7 +48,9 @@ var (
 			Width(40)
 
 	headerStyle = lipgloss.NewStyle().
-			MarginBottom(1)
+			MarginBottom(1).
+			Border(lipgloss.NormalBorder(), false, false, true, false).
+			BorderForeground(lipgloss.Color("240"))
 )
 
 type ViewMode int
@@ -126,10 +145,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "f10", "ctrl+c":
 			return m, tea.Quit
 		case "f2":
 			m.ShowMenu = !m.ShowMenu
+		case "f3":
+			m.Mode = DashboardMode
+			m.TrafficTable.Blur()
+			m.ShowMenu = false
+		case "f4":
+			m.Mode = TrafficMode
+			m.TrafficTable.Focus()
+			m.ShowMenu = false
 		case "tab":
 			if m.Mode == DashboardMode {
 				m.Mode = TrafficMode
@@ -162,7 +189,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.Mode == TrafficMode && !m.ShowMenu {
 				curr := m.TrafficTable.SelectedRow()
 				if len(curr) > 0 {
-					// Toggle details by clicking enter on a row
 					idx := m.TrafficTable.Cursor()
 					if idx >= 0 && idx < len(m.Traffic) {
 						m.SelectedPacket = &m.Traffic[idx]
@@ -190,21 +216,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.TermWidth = msg.Width
 		m.TermHeight = msg.Height
-		headerHeight := 10
-		if m.TermHeight <= headerHeight {
-			headerHeight = m.TermHeight / 2
-		}
+		headerHeight := 8
+		footerHeight := 1
 
 		if !m.Ready {
-			m.Viewport = viewport.New(msg.Width, msg.Height-headerHeight)
+			m.Viewport = viewport.New(msg.Width, msg.Height-headerHeight-footerHeight)
 			m.Viewport.SetContent(strings.Join(m.Logs, "\n"))
 			m.Ready = true
 		} else {
 			m.Viewport.Width = msg.Width
-			m.Viewport.Height = msg.Height - headerHeight
+			m.Viewport.Height = msg.Height - headerHeight - footerHeight
 		}
 		m.TrafficTable.SetWidth(msg.Width)
-		m.TrafficTable.SetHeight(msg.Height - headerHeight - 2)
+		m.TrafficTable.SetHeight(msg.Height - headerHeight - footerHeight - 2)
 
 	case LogMsg:
 		m.Logs = append(m.Logs, string(msg))
@@ -258,17 +282,27 @@ func (m Model) View() string {
 	uptime := time.Since(m.Uptime).Round(time.Second)
 	modeStr := "DASHBOARD"
 	if m.Mode == TrafficMode {
-		modeStr = "TRAFFIC MONITOR (WIRESHARK-STYLE)"
+		modeStr = "TRAFFIC MONITOR"
 	}
 
-	header := headerStyle.Render(
-		lipgloss.JoinVertical(lipgloss.Left,
-			titleStyle.Render("APIM CORE MONITOR")+" "+infoStyle.Render(modeStr),
-			fmt.Sprintf("Uptime: %s", infoStyle.Render(uptime.String())),
-			fmt.Sprintf("Requests: %s", infoStyle.Render(fmt.Sprintf("%d", m.TotalRequests))),
-			fmt.Sprintf("Avg Latency: %s", infoStyle.Render(fmt.Sprintf("%.2fms", m.AvgLatency))),
-			"",
-			titleStyle.Render(fmt.Sprintf("VIEW: [%s]", modeStr)),
+	// HTOP-like Header
+	header := headerStyle.Width(m.TermWidth).Render(
+		lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Width(m.TermWidth/2).Render(
+				lipgloss.JoinVertical(lipgloss.Left,
+					titleStyle.Render("APIM CORE"),
+					headerLabelStyle.Render("Uptime:  ")+infoStyle.Render(uptime.String()),
+					headerLabelStyle.Render("Requests: ")+infoStyle.Render(fmt.Sprintf("%d", m.TotalRequests)),
+					headerLabelStyle.Render("Latency:  ")+infoStyle.Render(fmt.Sprintf("%.2fms", m.AvgLatency)),
+				),
+			),
+			lipgloss.NewStyle().Width(m.TermWidth/2).Render(
+				lipgloss.JoinVertical(lipgloss.Left,
+					headerLabelStyle.Render("Mode:     ")+statusStyle.Render(modeStr),
+					headerLabelStyle.Render("Status:   ")+infoStyle.Render("RUNNING"),
+					"",
+				),
+			),
 		),
 	)
 
@@ -297,19 +331,40 @@ func (m Model) View() string {
 		}
 	}
 
-	view := header + "\n" + body
+	// HTOP-like Footer
+	footerParts := []string{
+		footerKeyStyle.Render("F2") + footerActionStyle.Render("Setup"),
+		footerKeyStyle.Render("F3") + footerActionStyle.Render("Dash"),
+		footerKeyStyle.Render("F4") + footerActionStyle.Render("Traffic"),
+		footerKeyStyle.Render("Tab") + footerActionStyle.Render("NextView"),
+		footerKeyStyle.Render("F10") + footerActionStyle.Render("Quit"),
+	}
+	footer := lipgloss.JoinHorizontal(lipgloss.Left, footerParts...)
+	footer = lipgloss.NewStyle().Background(lipgloss.Color("#7D56F4")).Width(m.TermWidth).Render(footer)
+
+	view := lipgloss.JoinVertical(lipgloss.Left, header, body)
+
+	// Add padding to ensure body fills space
+	bodyHeight := lipgloss.Height(body)
+	headerHeight := lipgloss.Height(header)
+	neededPadding := m.TermHeight - bodyHeight - headerHeight - 1
+	if neededPadding > 0 {
+		view += strings.Repeat("\n", neededPadding)
+	}
+
+	view += footer
 
 	if m.ShowMenu {
 		menuContent := lipgloss.JoinVertical(lipgloss.Left,
-			titleStyle.Render("F2 MENU"),
+			titleStyle.Render("F2 SETTINGS"),
 			"",
 			"[D] Switch to Dashboard",
 			"[T] Switch to Traffic Monitor",
 			"[R] Reload Configuration",
 			"[C] Clear Metrics & Traffic",
-			"[Q] Quit Monitor",
+			"[Esc] Close Menu",
+			"[F10] Quit",
 			"",
-			"Press F2 to close",
 		)
 		menu := menuStyle.Render(menuContent)
 
@@ -320,5 +375,6 @@ func (m Model) View() string {
 }
 
 func (m Model) overlay(base string, overlay string) string {
+	// Crude overlay for now
 	return base + "\n\n" + overlay
 }

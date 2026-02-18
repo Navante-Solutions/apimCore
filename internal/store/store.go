@@ -24,6 +24,7 @@ type ApiDefinition struct {
 	ID             int64
 	ProductID      int64
 	Name           string
+	Host           string
 	PathPrefix     string
 	BackendURL     string
 	OpenAPISpecURL string
@@ -131,6 +132,7 @@ func (s *Store) PopulateFromConfig(cfg *config.Config) {
 			d := &ApiDefinition{
 				ProductID:      id,
 				Name:           ac.Name,
+				Host:           ac.Host,
 				PathPrefix:     ac.PathPrefix,
 				BackendURL:     ac.BackendURL,
 				OpenAPISpecURL: ac.OpenAPISpecURL,

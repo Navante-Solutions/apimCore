@@ -96,4 +96,49 @@ func TestGateway_ServeHTTP(t *testing.T) {
 			t.Error("did not expect tenant ID without key")
 		}
 	})
+
+	t.Run("Host-based Routing", func(t *testing.T) {
+		cfg.Products = append(cfg.Products, config.ProductConfig{
+			Slug: "p2",
+			Apis: []config.ApiConfig{
+				{
+					Name:       "api-host",
+					Host:       "api.example.com",
+					PathPrefix: "/",
+					BackendURL: backend.URL,
+				},
+				{
+					Name:       "api-wildcard",
+					Host:       "*.dev.local",
+					PathPrefix: "/",
+					BackendURL: backend.URL,
+				},
+			},
+		})
+		s.PopulateFromConfig(cfg)
+
+		tests := []struct {
+			name   string
+			host   string
+			path   string
+			status int
+		}{
+			{"Exact Host Match", "api.example.com", "/anything", http.StatusOK},
+			{"Wildcard Subdomain Match", "service1.dev.local", "/hi", http.StatusOK},
+			{"Wildcard Nested Match", "foo.bar.dev.local", "/deep", http.StatusOK},
+			{"Host Mismatch", "other.com", "/api-host", http.StatusNotFound},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				req := httptest.NewRequest("GET", tt.path, nil)
+				req.Host = tt.host
+				rec := httptest.NewRecorder()
+				gw.ServeHTTP(rec, req)
+				if rec.Code != tt.status {
+					t.Errorf("host %s: expected %d, got %d", tt.host, tt.status, rec.Code)
+				}
+			})
+		}
+	})
 }

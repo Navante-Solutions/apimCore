@@ -31,6 +31,7 @@ type ProductConfig struct {
 
 type ApiConfig struct {
 	Name           string `yaml:"name"`
+	Host           string `yaml:"host"`
 	PathPrefix     string `yaml:"path_prefix"`
 	BackendURL     string `yaml:"target_url"`
 	OpenAPISpecURL string `yaml:"openapi_spec_url"`

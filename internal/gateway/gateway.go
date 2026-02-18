@@ -63,20 +63,39 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 	path := r.URL.Path
+	host := r.Host
 
 	var targetApi *config.ApiConfig
 
+	// Try specific host + path matches first
 	for i := range g.config.Products {
 		p := &g.config.Products[i]
 		for j := range p.Apis {
 			a := &p.Apis[j]
-			if strings.HasPrefix(path, a.PathPrefix) {
+			if a.Host != "" && matchHost(host, a.Host) && strings.HasPrefix(path, a.PathPrefix) {
 				targetApi = a
 				break
 			}
 		}
 		if targetApi != nil {
 			break
+		}
+	}
+
+	// Fallback to path-only matches if no host match found
+	if targetApi == nil {
+		for i := range g.config.Products {
+			p := &g.config.Products[i]
+			for j := range p.Apis {
+				a := &p.Apis[j]
+				if a.Host == "" && strings.HasPrefix(path, a.PathPrefix) {
+					targetApi = a
+					break
+				}
+			}
+			if targetApi != nil {
+				break
+			}
 		}
 	}
 
@@ -105,9 +124,18 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if sub != nil && sub.Active {
 				defs := g.store.ListDefinitionsByProduct(sub.ProductID)
 				for i := range defs {
-					if strings.HasPrefix(path, defs[i].PathPrefix) {
+					// Also prioritize Host + Path in definitions
+					if defs[i].Host != "" && matchHost(host, defs[i].Host) && strings.HasPrefix(path, defs[i].PathPrefix) {
 						apiDef = &defs[i]
 						break
+					}
+				}
+				if apiDef == nil {
+					for i := range defs {
+						if defs[i].Host == "" && strings.HasPrefix(path, defs[i].PathPrefix) {
+							apiDef = &defs[i]
+							break
+						}
 					}
 				}
 			}
@@ -171,6 +199,19 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("apim gateway: %s %s -> %s %d %dms", r.Method, path, backendName, rec.status, elapsed)
+}
+
+func matchHost(actual, target string) bool {
+	if actual == target {
+		return true
+	}
+	if strings.HasPrefix(target, "*.") {
+		suffix := target[1:] // suffix including the dot (e.g. ".example.com")
+		if strings.HasSuffix(actual, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func hashKey(key string) string {
