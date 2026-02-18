@@ -1,7 +1,7 @@
 .git
 .github
 *.md
-*.sum
+  
 .env
 .env.*
 *.log
