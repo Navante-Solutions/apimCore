@@ -4,19 +4,36 @@ gateway:
 server:
   listen: ":8081"
 
-backends:
-  - path_prefix: /educore
-    target_url: http://localhost:8082
-    name: EduCore
-  - path_prefix: /integra
-    target_url: http://localhost:8083
-    name: IntegraCore
-  - path_prefix: /identity
-    target_url: http://localhost:8084
-    name: IdentityCore
-  - path_prefix: /campus
-    target_url: http://localhost:8085
-    name: CampusCore
+products:
+  - name: "Educational Services"
+    slug: "edu"
+    description: "Core educational management APIs"
+    apis:
+      - name: "EduCore"
+        path_prefix: "/educore"
+        target_url: "http://localhost:8082"
+      - name: "IntegraCore"
+        path_prefix: "/integra"
+        target_url: "http://localhost:8083"
+
+  - name: "Platform Services"
+    slug: "platform"
+    description: "Identity and Campus infrastructure"
+    apis:
+      - name: "IdentityCore"
+        path_prefix: "/identity"
+        target_url: "http://localhost:8084"
+      - name: "CampusCore"
+        path_prefix: "/campus"
+        target_url: "http://localhost:8085"
+
+subscriptions:
+  - developer_id: "default-dev"
+    product_slug: "edu"
+    plan: "premium"
+    keys:
+      - name: "Default Key"
+        value: "dev-key-123"
 
 devportal:
   enabled: true

@@ -1,7 +1,6 @@
 package meter
 
 import (
-	"sync"
 	"time"
 
 	"github.com/navantesolutions/apimcore/internal/store"
@@ -9,11 +8,10 @@ import (
 )
 
 type Meter struct {
-	store       *store.Store
-	requestCnt  *prometheus.CounterVec
-	requestLat  *prometheus.HistogramVec
-	usageTotal  prometheus.Counter
-	mu          sync.Mutex
+	store      *store.Store
+	requestCnt *prometheus.CounterVec
+	requestLat *prometheus.HistogramVec
+	usageTotal prometheus.Counter
 }
 
 func New(s *store.Store, reg prometheus.Registerer) *Meter {
@@ -58,8 +56,8 @@ func (m *Meter) Record(backend, pathPrefix, method string, status int, durationM
 		TenantID:        tenantID,
 		Method:          method,
 		Path:            pathPrefix,
-		StatusCode:     status,
-		ResponseTimeMs: durationMs,
+		StatusCode:      status,
+		ResponseTimeMs:  durationMs,
 	})
 	m.usageTotal.Inc()
 }

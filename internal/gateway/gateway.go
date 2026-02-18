@@ -8,6 +8,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/navantesolutions/apimcore/config"
@@ -22,32 +23,52 @@ const (
 )
 
 type Gateway struct {
-	backends []config.BackendRoute
-	store    *store.Store
-	meter    *meter.Meter
-	proxy    *httputil.ReverseProxy
+	mu     sync.RWMutex
+	config *config.Config
+	store  *store.Store
+	meter  *meter.Meter
+	proxy  *httputil.ReverseProxy
 }
 
 func New(cfg *config.Config, s *store.Store, m *meter.Meter) *Gateway {
 	return &Gateway{
-		backends: cfg.Backends,
-		store:    s,
-		meter:    m,
-		proxy:    &httputil.ReverseProxy{},
+		config: cfg,
+		store:  s,
+		meter:  m,
+		proxy:  &httputil.ReverseProxy{},
 	}
 }
 
+func (g *Gateway) UpdateConfig(cfg *config.Config) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.config = cfg
+}
+
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
 	start := time.Now()
 	path := r.URL.Path
-	var target *config.BackendRoute
-	for i := range g.backends {
-		if strings.HasPrefix(path, g.backends[i].PathPrefix) {
-			target = &g.backends[i]
+
+	var targetApi *config.ApiConfig
+
+	for i := range g.config.Products {
+		p := &g.config.Products[i]
+		for j := range p.Apis {
+			a := &p.Apis[j]
+			if strings.HasPrefix(path, a.PathPrefix) {
+				targetApi = a
+				break
+			}
+		}
+		if targetApi != nil {
 			break
 		}
 	}
-	if target == nil {
+
+	if targetApi == nil {
 		http.Error(w, "no route for path", http.StatusNotFound)
 		g.meter.Record("", "", r.Method, http.StatusNotFound, time.Since(start).Milliseconds(), 0, 0, "")
 		return
@@ -89,14 +110,14 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		apiDefID = apiDef.ID
 		backendName = apiDef.Name
 	} else {
-		backendURL = target.TargetURL
-		backendName = target.Name
+		backendURL = targetApi.BackendURL
+		backendName = targetApi.Name
 	}
 
 	targetURL, err := url.Parse(backendURL)
 	if err != nil {
 		http.Error(w, "bad gateway config", http.StatusInternalServerError)
-		g.meter.Record(backendName, target.PathPrefix, r.Method, 502, time.Since(start).Milliseconds(), 0, apiDefID, "")
+		g.meter.Record(backendName, targetApi.PathPrefix, r.Method, 502, time.Since(start).Milliseconds(), 0, apiDefID, "")
 		return
 	}
 
@@ -120,7 +141,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		subID = sub.ID
 		tenantID = sub.TenantID
 	}
-	g.meter.Record(backendName, target.PathPrefix, r.Method, rec.status, elapsed, subID, apiDefID, tenantID)
+	g.meter.Record(backendName, targetApi.PathPrefix, r.Method, rec.status, elapsed, subID, apiDefID, tenantID)
 	log.Printf("apim gateway: %s %s -> %s %d %dms", r.Method, path, backendName, rec.status, elapsed)
 }
 

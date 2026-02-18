@@ -73,9 +73,9 @@ func (h *Handler) usage(w http.ResponseWriter, r *http.Request) {
 	since := time.Now().Add(-24 * time.Hour)
 	usage := h.store.UsageSince(since)
 	type summary struct {
-		Total   int            `json:"total"`
-		ByPath  map[string]int `json:"by_path"`
-		ByApi   map[string]int `json:"by_api"`
+		Total  int            `json:"total"`
+		ByPath map[string]int `json:"by_path"`
+		ByApi  map[string]int `json:"by_api"`
 	}
 	byPath := make(map[string]int)
 	byApi := make(map[string]int)

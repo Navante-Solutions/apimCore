@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/navantesolutions/apimcore/config"
 	"github.com/navantesolutions/apimcore/internal/admin"
@@ -31,16 +32,46 @@ func main() {
 	}
 
 	st := store.NewStore()
+	st.PopulateFromConfig(cfg)
+
 	reg := prometheus.NewRegistry()
 	m := meter.New(st, reg)
-
 	gw := gateway.New(cfg, st, m)
+
+	// Watch for config changes
+	go func() {
+		lastMod := time.Now()
+		for {
+			time.Sleep(5 * time.Second)
+			info, err := os.Stat(configPath)
+			if err != nil {
+				continue
+			}
+			if info.ModTime().After(lastMod) {
+				log.Printf("config file changed, reloading...")
+				newCfg, err := config.Load(configPath)
+				if err != nil {
+					log.Printf("failed to reload config: %v", err)
+					continue
+				}
+				st.PopulateFromConfig(newCfg)
+				gw.UpdateConfig(newCfg)
+				lastMod = info.ModTime()
+			}
+		}
+	}()
 	gatewayMux := http.NewServeMux()
 	gatewayMux.Handle("/", gw)
 
 	serverMux := http.NewServeMux()
-	serverMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK); _, _ = w.Write([]byte("OK")) })
-	serverMux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK); _, _ = w.Write([]byte("OK")) })
+	serverMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	})
+	serverMux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	})
 	serverMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	adminHandler := admin.New(st, "/api/admin")
 	adminHandler.Register(serverMux)

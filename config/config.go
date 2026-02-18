@@ -7,10 +7,11 @@ import (
 )
 
 type Config struct {
-	Gateway   GatewayConfig   `yaml:"gateway"`
-	Server    ServerConfig   `yaml:"server"`
-	Backends  []BackendRoute `yaml:"backends"`
-	DevPortal DevPortalConfig `yaml:"devportal"`
+	Gateway       GatewayConfig        `yaml:"gateway"`
+	Server        ServerConfig         `yaml:"server"`
+	Products      []ProductConfig      `yaml:"products"`
+	Subscriptions []SubscriptionConfig `yaml:"subscriptions"`
+	DevPortal     DevPortalConfig      `yaml:"devportal"`
 }
 
 type GatewayConfig struct {
@@ -21,10 +22,32 @@ type ServerConfig struct {
 	Listen string `yaml:"listen"`
 }
 
-type BackendRoute struct {
-	PathPrefix string `yaml:"path_prefix"`
-	TargetURL  string `yaml:"target_url"`
-	Name      string `yaml:"name"`
+type ProductConfig struct {
+	Name        string      `yaml:"name"`
+	Slug        string      `yaml:"slug"`
+	Description string      `yaml:"description"`
+	Apis        []ApiConfig `yaml:"apis"`
+}
+
+type ApiConfig struct {
+	Name           string `yaml:"name"`
+	PathPrefix     string `yaml:"path_prefix"`
+	BackendURL     string `yaml:"target_url"`
+	OpenAPISpecURL string `yaml:"openapi_spec_url"`
+	Version        string `yaml:"version"`
+}
+
+type SubscriptionConfig struct {
+	DeveloperID string      `yaml:"developer_id"`
+	ProductID   int64       `yaml:"product_id"`   // Internal ID mapping
+	ProductSlug string      `yaml:"product_slug"` // YAML lookup
+	Plan        string      `yaml:"plan"`
+	Keys        []KeyConfig `yaml:"keys"`
+}
+
+type KeyConfig struct {
+	Name  string `yaml:"name"`
+	Value string `yaml:"value"`
 }
 
 type DevPortalConfig struct {

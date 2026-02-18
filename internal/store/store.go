@@ -1,8 +1,12 @@
 package store
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"sync"
 	"time"
+
+	"github.com/navantesolutions/apimcore/config"
 )
 
 type ApiProduct struct {
@@ -17,27 +21,27 @@ type ApiProduct struct {
 }
 
 type ApiDefinition struct {
-	ID            int64
-	ProductID     int64
-	Name          string
-	PathPrefix    string
-	BackendURL    string
+	ID             int64
+	ProductID      int64
+	Name           string
+	PathPrefix     string
+	BackendURL     string
 	OpenAPISpecURL string
-	Version       string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	Version        string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type Subscription struct {
-	ID               int64
-	ProductID        int64
-	DeveloperID      string
-	TenantID         string
-	Plan             string
-	RateLimitPerMin  int
-	Active           bool
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID              int64
+	ProductID       int64
+	DeveloperID     string
+	TenantID        string
+	Plan            string
+	RateLimitPerMin int
+	Active          bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type ApiKey struct {
@@ -52,46 +56,124 @@ type ApiKey struct {
 }
 
 type RequestUsage struct {
-	ID             int64
-	SubscriptionID int64
+	ID              int64
+	SubscriptionID  int64
 	ApiDefinitionID int64
-	TenantID       string
-	Method         string
-	Path           string
-	StatusCode     int
-	ResponseTimeMs int64
-	RequestedAt    time.Time
+	TenantID        string
+	Method          string
+	Path            string
+	StatusCode      int
+	ResponseTimeMs  int64
+	RequestedAt     time.Time
 }
 
 type Store struct {
-	mu           sync.RWMutex
-	products     map[int64]*ApiProduct
-	definitions  map[int64]*ApiDefinition
+	mu            sync.RWMutex
+	products      map[int64]*ApiProduct
+	definitions   map[int64]*ApiDefinition
 	subscriptions map[int64]*Subscription
-	keysByHash   map[string]*ApiKey
-	keysByPrefix map[string]*ApiKey
-	usage        []RequestUsage
-	nextProduct  int64
-	nextDef      int64
-	nextSub      int64
-	nextKey      int64
-	nextUsage    int64
+	keysByHash    map[string]*ApiKey
+	keysByPrefix  map[string]*ApiKey
+	usage         []RequestUsage
+	nextProduct   int64
+	nextDef       int64
+	nextSub       int64
+	nextKey       int64
+	nextUsage     int64
 }
 
 func NewStore() *Store {
 	return &Store{
-		products:     make(map[int64]*ApiProduct),
-		definitions:  make(map[int64]*ApiDefinition),
+		products:      make(map[int64]*ApiProduct),
+		definitions:   make(map[int64]*ApiDefinition),
 		subscriptions: make(map[int64]*Subscription),
-		keysByHash:   make(map[string]*ApiKey),
-		keysByPrefix: make(map[string]*ApiKey),
-		usage:        make([]RequestUsage, 0, 10000),
-		nextProduct:  1,
-		nextDef:      1,
-		nextSub:      1,
-		nextKey:      1,
-		nextUsage:    1,
+		keysByHash:    make(map[string]*ApiKey),
+		keysByPrefix:  make(map[string]*ApiKey),
+		usage:         make([]RequestUsage, 0, 10000),
+		nextProduct:   1,
+		nextDef:       1,
+		nextSub:       1,
+		nextKey:       1,
+		nextUsage:     1,
 	}
+}
+
+func (s *Store) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.products = make(map[int64]*ApiProduct)
+	s.definitions = make(map[int64]*ApiDefinition)
+	s.subscriptions = make(map[int64]*Subscription)
+	s.keysByHash = make(map[string]*ApiKey)
+	s.keysByPrefix = make(map[string]*ApiKey)
+	s.nextProduct = 1
+	s.nextDef = 1
+	s.nextSub = 1
+	s.nextKey = 1
+}
+
+func (s *Store) PopulateFromConfig(cfg *config.Config) {
+	s.Reset()
+
+	productSlugToID := make(map[string]int64)
+
+	for _, pc := range cfg.Products {
+		p := &ApiProduct{
+			Name:        pc.Name,
+			Slug:        pc.Slug,
+			Description: pc.Description,
+			Published:   true,
+		}
+		id := s.CreateProduct(p)
+		productSlugToID[pc.Slug] = id
+
+		for _, ac := range pc.Apis {
+			d := &ApiDefinition{
+				ProductID:      id,
+				Name:           ac.Name,
+				PathPrefix:     ac.PathPrefix,
+				BackendURL:     ac.BackendURL,
+				OpenAPISpecURL: ac.OpenAPISpecURL,
+				Version:        ac.Version,
+			}
+			s.CreateDefinition(d)
+		}
+	}
+
+	for _, sc := range cfg.Subscriptions {
+		productID, ok := productSlugToID[sc.ProductSlug]
+		if !ok {
+			continue
+		}
+		sub := &Subscription{
+			ProductID:   productID,
+			DeveloperID: sc.DeveloperID,
+			Plan:        sc.Plan,
+			Active:      true,
+		}
+		subID := s.CreateSubscription(sub)
+
+		for _, kc := range sc.Keys {
+			hash := hashKey(kc.Value)
+			prefix := kc.Value
+			if len(prefix) > 8 {
+				prefix = prefix[:8]
+			}
+			k := &ApiKey{
+				SubscriptionID: subID,
+				KeyHash:        hash,
+				KeyPrefix:      prefix,
+				Name:           kc.Name,
+				Active:         true,
+			}
+			s.CreateApiKey(k)
+		}
+	}
+}
+
+func hashKey(key string) string {
+	h := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(h[:])
 }
 
 func (s *Store) CreateProduct(p *ApiProduct) int64 {

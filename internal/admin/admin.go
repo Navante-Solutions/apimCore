@@ -179,10 +179,10 @@ func (h *Handler) keys(w http.ResponseWriter, r *http.Request) {
 	k.ID = id
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]any{
-		"id":       id,
-		"key":      rawKey,
-		"prefix":   prefix,
-		"name":     k.Name,
+		"id":         id,
+		"key":        rawKey,
+		"prefix":     prefix,
+		"name":       k.Name,
 		"created_at": k.CreatedAt,
 	})
 }

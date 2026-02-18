@@ -1,101 +1,63 @@
-# ApimCore
+# APIM Core: The Modern API Gateway for Navante
 
-API Management da solucao Navante em Go: gateway unico, medidor de requisicoes e dev portal.
+Welcome to the official documentation and "How-To" site for APIM Core. This is a lightweight, high-performance API Gateway built in Go, designed to manage, meter, and secure your microservices with ease.
 
-## Funcoes
+---
 
-- **Gateway**: proxy reverso para EduCore, IntegraCore, IdentityCore e CampusCore com roteamento por path
-- **Medidor de requisicoes**: contagem por API, metodo, status e latencia; metricas Prometheus e historico em memoria
-- **Dev Portal**: documentacao publica dos produtos/APIs e metricas de uso (ultimas 24h)
-- **Admin API**: CRUD de produtos, definicoes de API, assinaturas e chaves de API
+## 🚀 Quick Navigation
 
-## Requisitos
+Explore our detailed guides to get up and running:
 
-- Go 1.22+
+- [**Getting Started**](docs/getting-started.md) - Install and run APIM Core in minutes.
+- [**Configuration Guide**](docs/configuration.md) - Learn how to use the YAML-driven setup and Hot-Reloading.
+- [**Architecture Overview**](docs/architecture.md) - Understand the internal design and components.
 
-## Configuracao
+---
 
-Copie e edite `config.yaml`. Principais entradas:
+## ✨ Core Features
 
-- `gateway.listen`: porta do gateway (ex.: `:8080`)
-- `server.listen`: porta do servidor (admin, dev portal, metricas) (ex.: `:8081`)
-- `backends`: lista de rotas path_prefix -> target_url para cada core
+### 🛡️ Secure & Scalable Gateway
+A robust reverse proxy that routes requests to your backends (EduCore, IntegraCore, etc.) based on clean URL paths.
 
-## Build e execucao
+### 📊 Real-time Metering
+Automatic tracking of requests per API, method, status, and latency. Fully integrated with Prometheus for advanced monitoring.
 
-```bash
-cd apimCore
-go mod tidy
-go build -o apim ./cmd/apim
-```
+### 🔄 YAML-Driven & Decoupled
+Manage your entire infrastructure through a single, version-controlled file. No database or complex frontend required for core operations.
 
-Ou use o Makefile: `make build` e `make run`.
+### ⚡ Dynamic Hot-Reload
+Change your configuration on the fly. APIM Core watches for file updates and applies them instantly without dropping a single connection.
 
-Variaveis de ambiente (producao):
+### 🌐 Integrated Developer Portal
+A built-in portal for your developers to explore API documentation and monitor their own usage metrics.
 
-- `APIM_CONFIG`: caminho do config (default: `config.yaml`)
-- `APIM_GATEWAY_LISTEN`: override da porta do gateway (ex.: `:8080`)
-- `APIM_SERVER_LISTEN`: override da porta do server (ex.: `:8081`)
+---
 
-## Endpoints
+## 🛠️ Management & API Reference
 
-| Onde | Path | Descricao |
-|------|------|------------|
-| Gateway (:8080) | /educore/*, /integra/*, etc. | Proxy para os backends |
-| Server (:8081) | /metrics | Prometheus (apim_requests_total, apim_request_duration_seconds, apim_usage_records_total) |
-| Server | /api/admin/products | GET/POST produtos |
-| Server | /api/admin/definitions | POST definicoes de API |
-| Server | /api/admin/subscriptions | GET/POST assinaturas |
-| Server | /api/admin/keys | POST criar chave (retorna a chave em claro uma unica vez) |
-| Server | /api/admin/usage | GET uso (query: hours=24) |
-| Server | /devportal | Dev Portal (HTML) |
-| Server | /devportal/api/products | Lista produtos publicados |
-| Server | /devportal/api/apis | Lista APIs (query: product_id opcional) |
-| Server | /devportal/api/usage | Resumo de uso 24h |
-| Server | /health, /ready | Health check (Kubernetes, load balancers) |
+| Component | Port | Key Endpoints |
+|-----------|------|---------------|
+| **Gateway** | `:8080` | `/educore/*`, `/identity/*` |
+| **Server** | `:8081` | `/metrics`, `/devportal`, `/api/admin/*` |
 
-## Uso da API via gateway
+### Key API Endpoints (Admin)
+- `GET /api/admin/products`: List all configured products.
+- `GET /api/admin/usage`: Retrieve real-time usage statistics.
+- `GET /health`: System health status.
 
-Envie o header `X-Api-Key: <sua-chave>` nas requisicoes. A chave e obtida via POST /api/admin/keys (corpo: `{"subscription_id": 1, "name": "minha-chave"}`). O gateway valida a chave, repassa o `X-Tenant-Id` quando houver e registra cada requisicao no medidor.
+---
 
-## Producao
+## 🏗️ Technical Stack
+- **Language:** Go 1.22+
+- **Monitoring:** Prometheus
+- **Deployment:** Docker & Docker Compose
+- **Configuration:** YAML (with Hot-Reload support)
 
-### CI (GitHub Actions)
+---
 
-- **CI** (`.github/workflows/ci.yml`): em todo push/PR em `main`/`master` roda build, testes e golangci-lint.
-- **Release** (`.github/workflows/release.yml`): em push de tag `v*` gera binario, builda imagem Docker, publica em GHCR e cria release com o binario.
+## 🤝 Contributing
+Please read our [Architecture Guide](docs/architecture.md) before submitting pull requests to ensure alignment with the project's design principles.
 
-Para gerar uma release: `git tag v1.0.0 && git push origin v1.0.0`. A imagem fica em `ghcr.io/<owner>/<repo>:v1.0.0`.
+---
 
-### Docker
-
-```bash
-docker build -t apimcore:local .
-docker run --rm -p 8080:8080 -p 8081:8081 -v $(pwd)/config.yaml:/etc/apim/config.yaml:ro -e APIM_CONFIG=/etc/apim/config.yaml apimcore:local
-```
-
-Ou com docker-compose (healthcheck e restart incluidos):
-
-```bash
-docker compose up -d
-```
-
-### Makefile
-
-- `make build` - compila o binario
-- `make test` - executa os testes
-- `make lint` - roda golangci-lint
-- `make docker` - builda a imagem Docker
-- `make run` - compila e executa
-- `make clean` - remove o binario
-
-## Estrutura
-
-- `cmd/apim`: main e embed do dev portal
-- `config`: carregamento YAML
-- `internal/store`: armazenamento em memoria (produtos, APIs, assinaturas, chaves, uso)
-- `internal/gateway`: proxy e gravacao de uso
-- `internal/meter`: metricas Prometheus e gravacao no store
-- `internal/admin`: API administrativa
-- `internal/devportal`: API publica do dev portal
-- `web/devportal`: UI do dev portal (embed em cmd/apim/web/devportal)
+*© 2024 Navante Solutions. Powered by Go.*
