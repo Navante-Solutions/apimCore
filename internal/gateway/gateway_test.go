@@ -53,7 +53,7 @@ func TestGateway_ServeHTTP(t *testing.T) {
 	// 3. Setup Gateway
 	reg := prometheus.NewRegistry()
 	m := meter.New(s, reg)
-	gw := New(cfg, s, m)
+	gw := New(cfg, s, m, nil)
 
 	t.Run("Valid Key and Routing", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/api1/hello", nil)

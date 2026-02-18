@@ -110,6 +110,18 @@ func main() {
 	}()
 
 	if *useTUI {
+		nodeID := os.Getenv("APIM_NODE_ID")
+		if nodeID == "" {
+			nodeID, _ = os.Hostname()
+		}
+		if nodeID == "" {
+			nodeID = "local"
+		}
+		clusterNodes := os.Getenv("APIM_CLUSTER_NODES")
+		if clusterNodes == "" {
+			clusterNodes = "1"
+		}
+
 		var p *tea.Program
 		tuiModel := tui.NewModel(func() {
 			newCfg, err := config.Load(configPath)
@@ -117,25 +129,27 @@ func main() {
 				gw.UpdateConfig(newCfg)
 				st.PopulateFromConfig(newCfg)
 			}
-		}, st, gw, hb)
+		}, st, gw, hb, configPath, nodeID, clusterNodes)
 
 		p = tea.NewProgram(tuiModel, tea.WithAltScreen())
 		log.SetOutput(&tuiWriter{p: p})
 
-		// Metrics updater
 		go func() {
 			ticker := time.NewTicker(2 * time.Second)
+			since := time.Now().Add(-1 * time.Hour)
 			for range ticker.C {
-				statsTotal, _, _ := m.StatsSince(time.Now().Add(-1 * time.Hour))
+				statsTotal, _, _ := m.StatsSince(since)
+				avgLat := m.AvgLatencySince(since)
+				blocked, rateLimited := gw.Stats()
 				p.Send(tui.MetricsUpdateMsg{
 					TotalRequests: statsTotal,
-					AvgLatency:    0, // TODO: calculate from mtr
+					AvgLatency:    avgLat,
 				})
-				// Send system stats
 				p.Send(hub.SystemStats{
 					TotalRequests: statsTotal,
-					AvgLatency:    0, // TODO: calculate from mtr
-					// CPU/RAM can be used for progress bars
+					AvgLatency:    avgLat,
+					RateLimited:   rateLimited,
+					Blocked:       blocked,
 				})
 			}
 		}()

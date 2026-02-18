@@ -3,9 +3,10 @@ package gateway
 import (
 	"net"
 	"net/http"
-	"sync"
+	"sync/atomic"
+	"time"
 
-	"golang.org/x/time/rate"
+	"github.com/navantesolutions/apimcore/internal/hub"
 )
 
 // IPBlacklistMiddleware blocks requests from IPs in the blacklist.
@@ -28,33 +29,22 @@ func (g *Gateway) IPBlacklistMiddleware() Middleware {
 			g.securityMu.Unlock()
 
 			if blocked {
+				atomic.AddInt64(&g.blockedCount, 1)
+				if g.Hub != nil {
+					g.Hub.PublishTraffic(hub.TrafficEvent{
+						Timestamp: time.Now(),
+						Method:    r.Method,
+						Path:      r.URL.Path,
+						Backend:   "",
+						Status:    http.StatusForbidden,
+						Latency:   0,
+						TenantID:  "",
+						Country:   "",
+						IP:        remoteIP,
+						Action:    "BLOCKED",
+					})
+				}
 				http.Error(w, "Forbidden: IP Blacklisted", http.StatusForbidden)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// RateLimitMiddleware provides Anti-DDoS protection using a token bucket.
-func RateLimitMiddleware(rps float64, burst int) Middleware {
-	var mu sync.Mutex
-	limiters := make(map[string]*rate.Limiter)
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			mu.Lock()
-			remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-			limiter, ok := limiters[remoteIP]
-			if !ok {
-				limiter = rate.NewLimiter(rate.Limit(rps), burst)
-				limiters[remoteIP] = limiter
-			}
-			mu.Unlock()
-
-			if !limiter.Allow() {
-				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 				return
 			}
 
@@ -91,6 +81,21 @@ func (g *Gateway) GeoIPMiddleware() Middleware {
 			g.securityMu.Unlock()
 
 			if !allowed {
+				atomic.AddInt64(&g.blockedCount, 1)
+				if g.Hub != nil {
+					g.Hub.PublishTraffic(hub.TrafficEvent{
+						Timestamp: time.Now(),
+						Method:    r.Method,
+						Path:      r.URL.Path,
+						Backend:   "",
+						Status:    http.StatusForbidden,
+						Latency:   0,
+						TenantID:  "",
+						Country:   country,
+						IP:        remoteIP,
+						Action:    "BLOCKED",
+					})
+				}
 				http.Error(w, "Forbidden: Geo-fenced", http.StatusForbidden)
 				return
 			}

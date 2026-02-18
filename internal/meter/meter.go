@@ -90,3 +90,8 @@ func (m *Meter) StatsSince(since time.Time) (total int64, byBackend map[string]i
 	}
 	return total, byBackend, byPath
 }
+
+func (m *Meter) AvgLatencySince(since time.Time) float64 {
+	avgMs, _ := m.store.AvgResponseTimeMsSince(since)
+	return avgMs
+}

@@ -353,6 +353,39 @@ func (s *Store) UsageSince(since time.Time) []RequestUsage {
 	return out
 }
 
+func (s *Store) AvgResponseTimeMsSince(since time.Time) (avgMs float64, count int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var sum int64
+	count = 0
+	for _, u := range s.usage {
+		if !u.RequestedAt.Before(since) {
+			sum += u.ResponseTimeMs
+			count++
+		}
+	}
+	if count == 0 {
+		return 0, 0
+	}
+	return float64(sum) / float64(count), count
+}
+
+func (s *Store) UniqueTenantIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := make(map[string]bool)
+	for _, sub := range s.subscriptions {
+		if sub.TenantID != "" {
+			seen[sub.TenantID] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	return out
+}
+
 func (s *Store) UsageBySubscription(subID int64, since time.Time) []RequestUsage {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -10,12 +10,14 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/navantesolutions/apimcore/config"
 	"github.com/navantesolutions/apimcore/internal/hub"
 	"github.com/navantesolutions/apimcore/internal/meter"
 	"github.com/navantesolutions/apimcore/internal/store"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -43,11 +45,12 @@ type Gateway struct {
 	proxy   *httputil.ReverseProxy
 	handler http.Handler
 	Hub     *hub.Broadcaster
-	// Security controls
-	securityMu sync.Mutex
-	blacklist  map[string]bool
-	blacknets  []*net.IPNet
-	allowedGeo map[string]bool
+	securityMu    sync.Mutex
+	blacklist     map[string]bool
+	blacknets     []*net.IPNet
+	allowedGeo    map[string]bool
+	blockedCount  int64
+	rateLimitedCount int64
 }
 
 func New(cfg *config.Config, s *store.Store, m *meter.Meter, h *hub.Broadcaster) *Gateway {
@@ -108,6 +111,10 @@ func (g *Gateway) GetSecurity() config.SecurityConfig {
 	}
 }
 
+func (g *Gateway) Stats() (blocked, rateLimited int64) {
+	return atomic.LoadInt64(&g.blockedCount), atomic.LoadInt64(&g.rateLimitedCount)
+}
+
 func (g *Gateway) UpdateConfig(cfg *config.Config) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -128,16 +135,52 @@ func (g *Gateway) rebuildHandler() {
 	}
 
 	if g.config.Security.RateLimit.Enabled {
-		middlewares = append(middlewares, RateLimitMiddleware(
-			g.config.Security.RateLimit.RPP,
-			g.config.Security.RateLimit.Burst,
-		))
+		middlewares = append(middlewares, g.RateLimitMiddleware())
 	}
 
 	// Always add GeoIP (handles Geo-fencing too)
 	middlewares = append(middlewares, g.GeoIPMiddleware())
 
 	g.handler = Chain(base, middlewares...)
+}
+
+func (g *Gateway) RateLimitMiddleware() Middleware {
+	var mu sync.Mutex
+	limiters := make(map[string]*rate.Limiter)
+	rps := g.config.Security.RateLimit.RPP
+	burst := g.config.Security.RateLimit.Burst
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+			limiter, ok := limiters[remoteIP]
+			if !ok {
+				limiter = rate.NewLimiter(rate.Limit(rps), burst)
+				limiters[remoteIP] = limiter
+			}
+			mu.Unlock()
+			if !limiter.Allow() {
+				atomic.AddInt64(&g.rateLimitedCount, 1)
+				if g.Hub != nil {
+					g.Hub.PublishTraffic(hub.TrafficEvent{
+						Timestamp: time.Now(),
+						Method:    r.Method,
+						Path:      r.URL.Path,
+						Backend:   "",
+						Status:    http.StatusTooManyRequests,
+						Latency:   0,
+						TenantID:  "",
+						Country:   r.Header.Get("X-Geo-Country"),
+						IP:        remoteIP,
+						Action:    "RATE_LIMIT",
+					})
+				}
+				http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -275,19 +318,20 @@ func (g *Gateway) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	g.meter.Record(backendName, targetApi.PathPrefix, r.Method, rec.status, elapsed, subID, apiDefID, tenantID)
 
-	// Emit traffic packet for TUI Hub
-	g.Hub.PublishTraffic(hub.TrafficEvent{
-		Timestamp: start,
-		Method:    r.Method,
-		Path:      path,
-		Backend:   backendName,
-		Status:    rec.status,
-		Latency:   elapsed,
-		TenantID:  tenantID,
-		Country:   country,
-		IP:        r.RemoteAddr,
-		Action:    "ALLOWED", // Default if it reached here
-	})
+	if g.Hub != nil {
+		g.Hub.PublishTraffic(hub.TrafficEvent{
+			Timestamp: start,
+			Method:    r.Method,
+			Path:      path,
+			Backend:   backendName,
+			Status:    rec.status,
+			Latency:   elapsed,
+			TenantID:  tenantID,
+			Country:   country,
+			IP:        r.RemoteAddr,
+			Action:    "ALLOWED",
+		})
+	}
 
 	log.Printf("apim gateway: %s %s -> %s %d %dms", r.Method, path, backendName, rec.status, elapsed)
 }

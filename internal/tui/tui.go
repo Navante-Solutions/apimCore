@@ -114,16 +114,19 @@ type tickMsg time.Time
 
 type TrafficPacket = hub.TrafficEvent
 
-type Model struct {
-	// Infrastructure
-	TermWidth  int
-	TermHeight int
-	Ready      bool
-	OnReload   func()
-	Store      *store.Store
-	Gateway    *gateway.Gateway
+const sparklineHistoryLen = 20
 
-	// Metrics & State
+type Model struct {
+	TermWidth   int
+	TermHeight  int
+	Ready       bool
+	OnReload    func()
+	Store       *store.Store
+	Gateway     *gateway.Gateway
+	ConfigPath  string
+	NodeID      string
+	ClusterNodes string
+
 	Uptime        time.Time
 	TotalRequests int64
 	AvgLatency    float64
@@ -136,19 +139,19 @@ type Model struct {
 	RateLimited   int64
 	Blocked       int64
 
-	// Navigation & Alerts
+	LastTotalRequests   int64
+	RequestCountHistory []int64
+
 	Alerts []Alert
 
-	// Components
 	Viewport     viewport.Model
 	TrafficTable table.Model
 	Progress     progress.Model
 
-	// Selection
 	SelectedPacket *hub.TrafficEvent
 }
 
-func NewModel(onReload func(), s *store.Store, g *gateway.Gateway, h *hub.Broadcaster) Model {
+func NewModel(onReload func(), s *store.Store, g *gateway.Gateway, h *hub.Broadcaster, configPath, nodeID, clusterNodes string) Model {
 	columns := []table.Column{
 		{Title: "Time", Width: 10},
 		{Title: "Geo", Width: 6},
@@ -178,20 +181,24 @@ func NewModel(onReload func(), s *store.Store, g *gateway.Gateway, h *hub.Broadc
 	t.SetStyles(tableStyles)
 
 	return Model{
-		Uptime:       time.Now(),
-		OnReload:     onReload,
-		Store:        s,
-		Gateway:      g,
-		Hub:          h,
-		TrafficTable: t,
-		Mode:         ViewDashboard,
-		Logs:         []string{},
-		Alerts:       []Alert{},
-		Traffic:      []hub.TrafficEvent{},
-		Progress:     progress.New(progress.WithDefaultGradient()),
-		TermWidth:    80,
-		TermHeight:   24,
-		Ready:        false,
+		Uptime:             time.Now(),
+		OnReload:           onReload,
+		Store:              s,
+		Gateway:            g,
+		Hub:                h,
+		ConfigPath:         configPath,
+		NodeID:             nodeID,
+		ClusterNodes:       clusterNodes,
+		TrafficTable:       t,
+		Mode:               ViewDashboard,
+		Logs:               []string{},
+		Alerts:             []Alert{},
+		Traffic:            []hub.TrafficEvent{},
+		RequestCountHistory: []int64{},
+		Progress:           progress.New(progress.WithDefaultGradient()),
+		TermWidth:          80,
+		TermHeight:         24,
+		Ready:              false,
 	}
 }
 
@@ -355,11 +362,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case MetricsUpdateMsg:
+		if m.LastTotalRequests > 0 && msg.TotalRequests >= m.LastTotalRequests {
+			delta := msg.TotalRequests - m.LastTotalRequests
+			m.RequestCountHistory = append(m.RequestCountHistory, delta)
+			if len(m.RequestCountHistory) > sparklineHistoryLen {
+				m.RequestCountHistory = m.RequestCountHistory[len(m.RequestCountHistory)-sparklineHistoryLen:]
+			}
+		}
+		m.LastTotalRequests = msg.TotalRequests
+		m.TotalRequests = msg.TotalRequests
+		m.AvgLatency = msg.AvgLatency
+		return m, nil
+
 	case hub.SystemStats:
+		if m.LastTotalRequests > 0 && msg.TotalRequests >= m.LastTotalRequests {
+			delta := msg.TotalRequests - m.LastTotalRequests
+			m.RequestCountHistory = append(m.RequestCountHistory, delta)
+			if len(m.RequestCountHistory) > sparklineHistoryLen {
+				m.RequestCountHistory = m.RequestCountHistory[len(m.RequestCountHistory)-sparklineHistoryLen:]
+			}
+		}
+		m.LastTotalRequests = msg.TotalRequests
 		m.TotalRequests = msg.TotalRequests
 		m.AvgLatency = msg.AvgLatency
 		m.CPUUsage = msg.CPUUsage
-		m.RAMUsage = float64(msg.MemoryUsageMB) / 8192.0 // Mock total RAM for scale
+		if msg.MemoryUsageMB > 0 {
+			m.RAMUsage = float64(msg.MemoryUsageMB) / 8192.0
+		}
 		m.RateLimited = msg.RateLimited
 		m.Blocked = msg.Blocked
 		return m, nil
@@ -465,19 +495,30 @@ func (m Model) dashboardView() string {
 	if sparkWidth < 8 {
 		sparkWidth = 8
 	}
-	spark := m.renderSparkline([]int64{10, 20, 15, 30, 25}, sparkWidth)
+	sparkData := m.RequestCountHistory
+	if len(sparkData) == 0 {
+		sparkData = []int64{0}
+	}
+	spark := m.renderSparkline(sparkData, sparkWidth)
 	trafficContent := fmt.Sprintf("Requests:  %s\nAvg Lat:   %s\nLimited:   %s\n\nPERFORMANCE TREND:\n%s",
 		infoStyle.Render(fmt.Sprintf("%d", m.TotalRequests)),
 		infoStyle.Render(fmt.Sprintf("%.2fms", m.AvgLatency)),
 		warningStyle.Render(fmt.Sprintf("%d", m.RateLimited)),
 		specialStyle.Render(spark))
 
-	securityContent := fmt.Sprintf("Blocked:   %s\nGeo-fence: %s\nThreats:   %s\n\nNODE:      %s\nNODES:     %s",
+	nodeID := m.NodeID
+	if nodeID == "" {
+		nodeID = "local"
+	}
+	clusterNodes := m.ClusterNodes
+	if clusterNodes == "" {
+		clusterNodes = "1"
+	}
+	securityContent := fmt.Sprintf("Blocked:   %s\nGeo-fence: %s\n\nNODE:      %s\nNODES:     %s",
 		warningStyle.Render(fmt.Sprintf("%d", m.Blocked)),
 		specialStyle.Render("ACTIVE"),
-		warningStyle.Render("HIGH"),
-		infoStyle.Render("US-EAST-1A"),
-		infoStyle.Render("12 ACTIVE"))
+		infoStyle.Render(nodeID),
+		infoStyle.Render(clusterNodes))
 
 	cardStyle := columnStyle.MarginRight(0).Width(cardWidth)
 	vitalsCard := cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("SYSTEM VITALS"), vitalsContent))
@@ -551,7 +592,11 @@ func (m Model) configView() string {
 		Padding(0, 1).
 		Width(bodyWidth - 2).
 		MaxWidth(bodyWidth - 2)
-	content := "Loaded from: config.yaml\n\n(Editable Console - Coming Soon)"
+	path := m.ConfigPath
+		if path == "" {
+			path = "config.yaml"
+		}
+		content := fmt.Sprintf("Loaded from: %s\n\nView-only. Edit file and press [R] to reload.", path)
 	boxContent := boxStyle.Render(dashboardTitleStyle.Render("LIVE CONFIGURATION (YAML)") + "\n\n" + content)
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("CONFIG"),
@@ -571,7 +616,20 @@ func (m Model) portalView() string {
 		Padding(0, 1).
 		Width(bodyWidth - 2).
 		MaxWidth(bodyWidth - 2)
-	content := fmt.Sprintf("Public APIs: 2\nDocumentation: 85%%\nStatus: %s", specialStyle.Render("LIVE"))
+	defs := m.Store.ListDefinitions()
+		pubCount := 0
+		withSpec := 0
+		for _, d := range defs {
+			pubCount++
+			if d.OpenAPISpecURL != "" {
+				withSpec++
+			}
+		}
+		docPct := "N/A"
+		if pubCount > 0 {
+			docPct = fmt.Sprintf("%d%%", (withSpec*100)/pubCount)
+		}
+		content := fmt.Sprintf("Public APIs: %d\nDocumentation: %s\nStatus: %s", pubCount, docPct, specialStyle.Render("LIVE"))
 	boxContent := boxStyle.Render(dashboardTitleStyle.Render("DEVELOPER PORTAL") + "\n\n" + content)
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("PORTAL"),
@@ -641,8 +699,20 @@ func (m Model) adminView() string {
 	}
 
 	subs := m.Store.ListSubscriptions()
+	tenants := m.Store.UniqueTenantIDs()
 	subContent := fmt.Sprintf("ACTIVE SUBSCRIPTIONS: %d\n", len(subs))
-	subContent += "TENANTS: Walmart, Target, Acme"
+	if len(tenants) > 0 {
+		maxShow := 5
+		if len(tenants) < maxShow {
+			maxShow = len(tenants)
+		}
+		subContent += "TENANTS: " + strings.Join(tenants[:maxShow], ", ")
+		if len(tenants) > maxShow {
+			subContent += fmt.Sprintf(" (+%d)", len(tenants)-maxShow)
+		}
+	} else {
+		subContent += "TENANTS: (none)"
+	}
 
 	cardsRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("CATALOG"), prodContent)),
