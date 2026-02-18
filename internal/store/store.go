@@ -234,6 +234,16 @@ func (s *Store) ListDefinitionsByProduct(productID int64) []ApiDefinition {
 	return out
 }
 
+func (s *Store) ListDefinitions() []ApiDefinition {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]ApiDefinition, 0, len(s.definitions))
+	for _, d := range s.definitions {
+		out = append(out, *cloneDefinition(d))
+	}
+	return out
+}
+
 func (s *Store) CreateSubscription(sub *Subscription) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -259,6 +269,16 @@ func (s *Store) ListSubscriptionsByProduct(productID int64) []Subscription {
 		if sub.ProductID == productID {
 			out = append(out, *cloneSubscription(sub))
 		}
+	}
+	return out
+}
+
+func (s *Store) ListSubscriptions() []Subscription {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Subscription, 0, len(s.subscriptions))
+	for _, sub := range s.subscriptions {
+		out = append(out, *cloneSubscription(sub))
 	}
 	return out
 }

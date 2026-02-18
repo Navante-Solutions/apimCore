@@ -1,0 +1,21 @@
+# Security-Hardened Configuration
+products:
+  - name: "Secure API"
+    slug: "secure"
+    description: "Internal APIs with strict rate limits"
+    apis:
+      - name: "Payment Service"
+        host: "payments.internal"
+        path_prefix: "/pay"
+        backend_url: "https://internal-payments:8443"
+
+security:
+  ip_blacklist:
+    - "1.2.3.4"
+    - "192.168.100.0/24"
+    - "10.0.0.5"
+  allowed_countries: [] # Empty allows all
+  rate_limit:
+    enabled: true
+    rps: 0.5 # Very strict: 1 request every 2 seconds
+    burst: 2

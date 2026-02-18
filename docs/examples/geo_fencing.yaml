@@ -1,0 +1,21 @@
+# Regional Access Control (Geo-fencing)
+products:
+  - name: "Global Edge Service"
+    slug: "edge"
+    apis:
+      - name: "Content API"
+        host: "*"
+        path_prefix: "/content"
+        backend_url: "http://edge-origin:8080"
+
+security:
+  allowed_countries:
+    - "BR" # BRAZIL
+    - "US" # USA
+    - "Local" # Localhost range
+  # Requests from any other country (DE, CN, etc) will receive a 403 Forbidden.
+  
+  rate_limit:
+    enabled: true
+    rps: 50
+    burst: 100

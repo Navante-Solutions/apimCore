@@ -12,6 +12,7 @@ type Config struct {
 	Products      []ProductConfig      `yaml:"products"`
 	Subscriptions []SubscriptionConfig `yaml:"subscriptions"`
 	DevPortal     DevPortalConfig      `yaml:"devportal"`
+	Security      SecurityConfig       `yaml:"security"`
 }
 
 type GatewayConfig struct {
@@ -54,6 +55,18 @@ type KeyConfig struct {
 type DevPortalConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Path    string `yaml:"path"`
+}
+
+type SecurityConfig struct {
+	IPBlacklist      []string        `yaml:"ip_blacklist"`
+	AllowedCountries []string        `yaml:"allowed_countries"`
+	RateLimit        RateLimitConfig `yaml:"rate_limit"`
+}
+
+type RateLimitConfig struct {
+	Enabled bool    `yaml:"enabled"`
+	RPP     float64 `yaml:"requests_per_second"`
+	Burst   int     `yaml:"burst"`
 }
 
 func Load(path string) (*Config, error) {

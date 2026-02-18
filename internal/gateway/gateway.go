@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/navantesolutions/apimcore/config"
+	"github.com/navantesolutions/apimcore/internal/hub"
 	"github.com/navantesolutions/apimcore/internal/meter"
 	"github.com/navantesolutions/apimcore/internal/store"
 )
@@ -30,24 +32,79 @@ type TrafficPacket struct {
 	Status    int
 	Latency   int64
 	TenantID  string
+	Country   string
 }
 
 type Gateway struct {
-	mu          sync.RWMutex
-	config      *config.Config
-	store       *store.Store
-	meter       *meter.Meter
-	proxy       *httputil.ReverseProxy
-	TrafficChan chan TrafficPacket
+	mu      sync.RWMutex
+	config  *config.Config
+	store   *store.Store
+	meter   *meter.Meter
+	proxy   *httputil.ReverseProxy
+	handler http.Handler
+	Hub     *hub.Broadcaster
+	// Security controls
+	securityMu sync.Mutex
+	blacklist  map[string]bool
+	blacknets  []*net.IPNet
+	allowedGeo map[string]bool
 }
 
-func New(cfg *config.Config, s *store.Store, m *meter.Meter) *Gateway {
-	return &Gateway{
-		config:      cfg,
-		store:       s,
-		meter:       m,
-		proxy:       &httputil.ReverseProxy{},
-		TrafficChan: make(chan TrafficPacket, 100),
+func New(cfg *config.Config, s *store.Store, m *meter.Meter, h *hub.Broadcaster) *Gateway {
+	g := &Gateway{
+		config: cfg,
+		store:  s,
+		meter:  m,
+		proxy:  &httputil.ReverseProxy{},
+		Hub:    h,
+	}
+	g.UpdateSecurity(cfg.Security)
+	g.rebuildHandler()
+	return g
+}
+
+func (g *Gateway) UpdateSecurity(cfg config.SecurityConfig) {
+	g.securityMu.Lock()
+	defer g.securityMu.Unlock()
+
+	g.blacklist = make(map[string]bool)
+	g.blacknets = make([]*net.IPNet, 0)
+	g.allowedGeo = make(map[string]bool)
+
+	for _, entry := range cfg.IPBlacklist {
+		if _, ipnet, err := net.ParseCIDR(entry); err == nil {
+			g.blacknets = append(g.blacknets, ipnet)
+		} else if ip := net.ParseIP(entry); ip != nil {
+			g.blacklist[ip.String()] = true
+		}
+	}
+
+	for _, country := range cfg.AllowedCountries {
+		g.allowedGeo[country] = true
+	}
+}
+
+func (g *Gateway) GetSecurity() config.SecurityConfig {
+	g.securityMu.Lock()
+	defer g.securityMu.Unlock()
+
+	blacklist := make([]string, 0, len(g.blacklist)+len(g.blacknets))
+	for ip := range g.blacklist {
+		blacklist = append(blacklist, ip)
+	}
+	for _, net := range g.blacknets {
+		blacklist = append(blacklist, net.String())
+	}
+
+	allowed := make([]string, 0, len(g.allowedGeo))
+	for geo := range g.allowedGeo {
+		allowed = append(allowed, geo)
+	}
+
+	return config.SecurityConfig{
+		IPBlacklist:      blacklist,
+		AllowedCountries: allowed,
+		RateLimit:        g.config.Security.RateLimit,
 	}
 }
 
@@ -55,15 +112,50 @@ func (g *Gateway) UpdateConfig(cfg *config.Config) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.config = cfg
+	g.UpdateSecurity(cfg.Security)
+	g.rebuildHandler()
+}
+
+func (g *Gateway) rebuildHandler() {
+	// Base handler is the proxy logic
+	base := http.HandlerFunc(g.proxyHandler)
+
+	var middlewares []Middleware
+
+	// Add Security Middlewares
+	if g.config.Security.IPBlacklist != nil {
+		middlewares = append(middlewares, g.IPBlacklistMiddleware())
+	}
+
+	if g.config.Security.RateLimit.Enabled {
+		middlewares = append(middlewares, RateLimitMiddleware(
+			g.config.Security.RateLimit.RPP,
+			g.config.Security.RateLimit.Burst,
+		))
+	}
+
+	// Always add GeoIP (handles Geo-fencing too)
+	middlewares = append(middlewares, g.GeoIPMiddleware())
+
+	g.handler = Chain(base, middlewares...)
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.mu.RLock()
+	handler := g.handler
+	g.mu.RUnlock()
+
+	handler.ServeHTTP(w, r)
+}
+
+func (g *Gateway) proxyHandler(w http.ResponseWriter, r *http.Request) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
 	start := time.Now()
 	path := r.URL.Path
 	host := r.Host
+	country := r.Header.Get("X-Geo-Country")
 
 	var targetApi *config.ApiConfig
 
@@ -183,9 +275,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	g.meter.Record(backendName, targetApi.PathPrefix, r.Method, rec.status, elapsed, subID, apiDefID, tenantID)
 
-	// Emit traffic packet for TUI
-	select {
-	case g.TrafficChan <- TrafficPacket{
+	// Emit traffic packet for TUI Hub
+	g.Hub.PublishTraffic(hub.TrafficEvent{
 		Timestamp: start,
 		Method:    r.Method,
 		Path:      path,
@@ -193,15 +284,20 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Status:    rec.status,
 		Latency:   elapsed,
 		TenantID:  tenantID,
-	}:
-	default:
-		// Drop if channel full
-	}
+		Country:   country,
+		IP:        r.RemoteAddr,
+		Action:    "ALLOWED", // Default if it reached here
+	})
 
 	log.Printf("apim gateway: %s %s -> %s %d %dms", r.Method, path, backendName, rec.status, elapsed)
 }
 
 func matchHost(actual, target string) bool {
+	// Strip port if present
+	if h, _, err := net.SplitHostPort(actual); err == nil {
+		actual = h
+	}
+
 	if actual == target {
 		return true
 	}

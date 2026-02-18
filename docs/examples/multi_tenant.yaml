@@ -1,0 +1,44 @@
+# Enterprise Multi-Tenant Configuration
+products:
+  - name: "Retail E-Commerce"
+    slug: "retail"
+    apis:
+      - name: "Order API"
+        host: "api.retail-platform.com"
+        path_prefix: "/orders"
+        backend_url: "http://order-srv:8000"
+      - name: "Stock API"
+        host: "api.retail-platform.com"
+        path_prefix: "/stock"
+        backend_url: "http://stock-srv:8000"
+
+  - name: "Logistics Admin"
+    slug: "logistics"
+    apis:
+      - name: "Fleet API"
+        host: "ship.example.com"
+        path_prefix: "/v1/fleet"
+        backend_url: "http://logistics-backend:9000"
+
+subscriptions:
+  - product_slug: "retail"
+    developer_id: "walmart-dev"
+    plan: "Enterprise"
+    keys:
+      - name: "Prod Key"
+        value: "WLM-SEC-8822"
+      - name: "Staging Key"
+        value: "WLM-STG-5511"
+
+  - product_slug: "retail"
+    developer_id: "target-dev"
+    plan: "Pro"
+    keys:
+      - name: "Target Key"
+        value: "TRG-API-001"
+
+security:
+  rate_limit:
+    enabled: true
+    rps: 100
+    burst: 200

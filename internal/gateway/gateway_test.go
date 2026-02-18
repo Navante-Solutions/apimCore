@@ -97,6 +97,92 @@ func TestGateway_ServeHTTP(t *testing.T) {
 		}
 	})
 
+	t.Run("IP Blacklist", func(t *testing.T) {
+		cfg.Security.IPBlacklist = []string{"1.2.3.4", "192.168.1.0/24"}
+		gw.UpdateConfig(cfg)
+
+		tests := []struct {
+			name   string
+			remote string
+			status int
+		}{
+			{"Blocked IP", "1.2.3.4:1234", http.StatusForbidden},
+			{"Blocked CIDR", "192.168.1.10:5555", http.StatusForbidden},
+			{"Allowed IP", "5.5.5.5:80", http.StatusOK},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				req := httptest.NewRequest("GET", "/api1/hello", nil)
+				req.RemoteAddr = tt.remote
+				rec := httptest.NewRecorder()
+				gw.ServeHTTP(rec, req)
+				if rec.Code != tt.status {
+					t.Errorf("%s: expected %d, got %d", tt.name, tt.status, rec.Code)
+				}
+			})
+		}
+		// Reset
+		cfg.Security.IPBlacklist = nil
+		gw.UpdateConfig(cfg)
+	})
+
+	t.Run("Rate Limiting", func(t *testing.T) {
+		cfg.Security.RateLimit = config.RateLimitConfig{
+			Enabled: true,
+			RPP:     100, // Higher limit for testing other things if needed
+			Burst:   100,
+		}
+		gw.UpdateConfig(cfg)
+
+		req := httptest.NewRequest("GET", "/api1/hello", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+
+		// 1st request: OK
+		rec1 := httptest.NewRecorder()
+		gw.ServeHTTP(rec1, req)
+		if rec1.Code != http.StatusOK {
+			t.Errorf("1st request: expected 200, got %d", rec1.Code)
+		}
+
+		// Now force a 429 with tight limits
+		cfg.Security.RateLimit = config.RateLimitConfig{
+			Enabled: true,
+			RPP:     0.1,
+			Burst:   1,
+		}
+		gw.UpdateConfig(cfg)
+
+		// 1st request (consumes the burst token)
+		rec2 := httptest.NewRecorder()
+		gw.ServeHTTP(rec2, req)
+		if rec2.Code != http.StatusOK {
+			t.Errorf("2nd request (1st with limit): expected 200, got %d", rec2.Code)
+		}
+
+		// 2nd request (immediate, no tokens left)
+		rec3 := httptest.NewRecorder()
+		gw.ServeHTTP(rec3, req)
+		if rec3.Code != http.StatusTooManyRequests {
+			t.Errorf("3rd request: expected 429, got %d", rec3.Code)
+		}
+
+		// Reset for next tests
+		cfg.Security.RateLimit.Enabled = false
+		gw.UpdateConfig(cfg)
+	})
+
+	t.Run("GeoIP Logic", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api1/hello", nil)
+		req.RemoteAddr = "8.8.8.8:1234"
+		rec := httptest.NewRecorder()
+		gw.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d", rec.Code)
+		}
+	})
+
 	t.Run("Host-based Routing", func(t *testing.T) {
 		cfg.Products = append(cfg.Products, config.ProductConfig{
 			Slug: "p2",

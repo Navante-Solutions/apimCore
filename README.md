@@ -1,63 +1,72 @@
-# APIM Core: The Modern API Gateway for Navante
+# APIM Core 🚀
 
-Welcome to the official documentation and "How-To" site for APIM Core. This is a lightweight, high-performance API Gateway built in Go, designed to manage, meter, and secure your microservices with ease.
+**APIM Core** is a lightweight, high-performance, and Go-native API Management solution designed for modern distributed architectures. It provides a robust Gateway with a built-in interactive Management Hub (TUI), enabling real-time monitoring and control of your API ecosystem.
 
----
-
-## 🚀 Quick Navigation
-
-Explore our detailed guides to get up and running:
-
-- [**Getting Started**](docs/getting-started.md) - Install and run APIM Core in minutes.
-- [**Configuration Guide**](docs/configuration.md) - Learn how to use the YAML-driven setup and Hot-Reloading.
-- [**Architecture Overview**](docs/architecture.md) - Understand the internal design and components.
+Inspired by industry leaders like Apache APISIX, APIM Core brings a modular middleware engine and a powerful YAML-driven configuration system to your local environment.
 
 ---
 
-## ✨ Core Features
+## ✨ Key Features
 
-### 🛡️ Secure & Scalable Gateway
-A robust reverse proxy that routes requests to your backends (EduCore, IntegraCore, etc.) based on clean URL paths.
-
-### 📊 Real-time Metering
-Automatic tracking of requests per API, method, status, and latency. Fully integrated with Prometheus for advanced monitoring.
-
-### 🔄 YAML-Driven & Decoupled
-Manage your entire infrastructure through a single, version-controlled file. No database or complex frontend required for core operations.
-
-### ⚡ Dynamic Hot-Reload
-Change your configuration on the fly. APIM Core watches for file updates and applies them instantly without dropping a single connection.
-
-### 🌐 Integrated Developer Portal
-A built-in portal for your developers to explore API documentation and monitor their own usage metrics.
+- 🛡️ **Advanced Security**: Built-in IP Blacklisting, CIDR blocking, and Anti-DDoS rate limiting.
+- 🌍 **Geo-fencing**: Regional access control based on GeoIP resolution (mocked in core, production-ready logic).
+- ⛓️ **Middleware Engine**: Flexible request processing pipeline for easy expansion.
+- 🚦 **Multi-tenancy**: First-class support for tenant-based routing and metrics.
+- 🎮 **Turbo Management Hub (TUI)**: A comprehensive console for real-time monitoring, traffic analysis, and administration.
+- 📦 **Plug-and-Play**: Single binary with no external dependencies (Redis/DB optional for persistence).
 
 ---
 
-## 🛠️ Management & API Reference
+## 🛠️ Getting Started
 
-| Component | Port | Key Endpoints |
-|-----------|------|---------------|
-| **Gateway** | `:8080` | `/educore/*`, `/identity/*` |
-| **Server** | `:8081` | `/metrics`, `/devportal`, `/api/admin/*` |
+### Prerequisites
+- Go 1.22+
 
-### Key API Endpoints (Admin)
-- `GET /api/admin/products`: List all configured products.
-- `GET /api/admin/usage`: Retrieve real-time usage statistics.
-- `GET /health`: System health status.
+### Quick Start
+1. **Clone and Build**:
+   ```bash
+   git clone https://github.com/navante-solutions/apimcore.git
+   cd apimcore
+   go build ./cmd/apim
+   ```
+
+2. **Run with Default Config**:
+   ```bash
+   ./apim --config config.yaml --tui
+   ```
+
+3. **Explore the TUI**:
+   Press `F3` to open the Navigation Menu and explore Dashboard, Traffic, Admin, and Security views.
 
 ---
 
-## 🏗️ Technical Stack
-- **Language:** Go 1.22+
-- **Monitoring:** Prometheus
-- **Deployment:** Docker & Docker Compose
-- **Configuration:** YAML (with Hot-Reload support)
+## 🎮 The TUI Management Hub
+
+APIM Core features a state-of-the-art terminal interface (TUI) for management:
+
+- **Dashboard (F3 Menu)**: System vitals, uptime, and real-time event logs.
+- **Traffic Monitor (F4)**: Wireshark-style request inspector with GeoIP flags and security highlighting.
+- **Administration (F5)**: Live view of Products, API Definitions, and Subscriptions.
+- **Security Control (F6)**: Interactive management of Blacklists and Geo-fencing policies.
+- **System Health (F7)**: Integrated health checks and internal metrics.
+
+---
+
+## ⚙️ Configuration scenarios
+
+We provide a library of configuration examples in the `/examples` directory:
+
+- [basic.yaml](examples/basic.yaml): Simple one-product, one-API setup.
+- [security.yaml](examples/security.yaml): Strict rate limits and IP protection.
+- [multi-tenant.yaml](examples/multi_tenant.yaml): Complex Enterprise-grade multi-tenant configuration.
+- [geo-fencing.yaml](examples/geo_fencing.yaml): Regional access control (e.g., EU-only vs Global).
 
 ---
 
 ## 🤝 Contributing
-Please read our [Architecture Guide](docs/architecture.md) before submitting pull requests to ensure alignment with the project's design principles.
 
----
+We welcome contributions! Please feel free to submit Pull Requests or open issues for feature requests and bug reports.
 
-*© 2024 Navante Solutions. Powered by Go.*
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

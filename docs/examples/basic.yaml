@@ -1,0 +1,26 @@
+# Basic Setup: One Product, One API
+products:
+  - name: "Public API"
+    slug: "public"
+    description: "Our main public catalog"
+    apis:
+      - name: "Catalog Service"
+        host: "*"
+        path_prefix: "/catalog"
+        backend_url: "https://api.example.com/v1"
+        version: "v1"
+
+subscriptions:
+  - product_slug: "public"
+    developer_id: "dev-1"
+    plan: "Free"
+    keys:
+      - name: "Primary Key"
+        value: "default-secret-key-123"
+
+security:
+  ip_blacklist: []
+  rate_limit:
+    enabled: true
+    rps: 10
+    burst: 20

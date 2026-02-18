@@ -19,6 +19,7 @@ import (
 	"github.com/navantesolutions/apimcore/internal/admin"
 	"github.com/navantesolutions/apimcore/internal/devportal"
 	"github.com/navantesolutions/apimcore/internal/gateway"
+	"github.com/navantesolutions/apimcore/internal/hub"
 	"github.com/navantesolutions/apimcore/internal/meter"
 	"github.com/navantesolutions/apimcore/internal/store"
 	"github.com/navantesolutions/apimcore/internal/tui"
@@ -56,7 +57,8 @@ func main() {
 
 	reg := prometheus.NewRegistry()
 	m := meter.New(st, reg)
-	gw := gateway.New(cfg, st, m)
+	hb := hub.NewBroadcaster()
+	gw := gateway.New(cfg, st, m, hb)
 
 	// Watch for config changes
 	go func() {
@@ -109,15 +111,14 @@ func main() {
 
 	if *useTUI {
 		var p *tea.Program
-		onReload := func() {
+		tuiModel := tui.NewModel(func() {
 			newCfg, err := config.Load(configPath)
 			if err == nil {
-				st.PopulateFromConfig(newCfg)
 				gw.UpdateConfig(newCfg)
+				st.PopulateFromConfig(newCfg)
 			}
-		}
+		}, st, gw, hb)
 
-		tuiModel := tui.NewModel(onReload)
 		p = tea.NewProgram(tuiModel, tea.WithAltScreen())
 		log.SetOutput(&tuiWriter{p: p})
 
@@ -130,21 +131,19 @@ func main() {
 					TotalRequests: statsTotal,
 					AvgLatency:    0, // TODO: calculate from mtr
 				})
+				// Send system stats
+				p.Send(hub.SystemStats{
+					TotalRequests: statsTotal,
+					AvgLatency:    0, // TODO: calculate from mtr
+					// CPU/RAM can be used for progress bars
+				})
 			}
 		}()
 
-		// Traffic stream
+		// Traffic stream via Hub
 		go func() {
-			for pkt := range gw.TrafficChan {
-				p.Send(tui.TrafficPacket{
-					Timestamp: pkt.Timestamp,
-					Method:    pkt.Method,
-					Path:      pkt.Path,
-					Backend:   pkt.Backend,
-					Status:    pkt.Status,
-					Latency:   pkt.Latency,
-					TenantID:  pkt.TenantID,
-				})
+			for pkt := range hb.TrafficChan() {
+				p.Send(pkt)
 			}
 		}()
 
