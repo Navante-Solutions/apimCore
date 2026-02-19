@@ -626,7 +626,7 @@ func (m Model) dashboardView() string {
 	)
 }
 
-func (m Model) renderGlobalRightPanel(width int) string {
+func (m Model) renderGlobalRightPanel(width, height int) string {
 	lines := []string{
 		dashboardTitleStyle.Render("THREAT SUMMARY"),
 		"",
@@ -655,6 +655,9 @@ func (m Model) renderGlobalRightPanel(width int) string {
 		Padding(0, 1).
 		Width(width).
 		MaxWidth(width)
+	if height > 0 {
+		panelStyle = panelStyle.Height(height)
+	}
 	return panelStyle.Render(strings.Join(lines, "\n"))
 }
 
@@ -662,6 +665,10 @@ func (m Model) globalView() string {
 	bodyWidth := m.TermWidth - 4
 	if bodyWidth < 40 {
 		bodyWidth = 40
+	}
+	contentHeight := m.TermHeight - 10
+	if contentHeight < 14 {
+		contentHeight = 14
 	}
 	leftWidth := GlobalMapWidth
 	if leftWidth > bodyWidth-24 {
@@ -677,7 +684,8 @@ func (m Model) globalView() string {
 		BorderForeground(subtle).
 		Padding(0, 1).
 		Width(leftWidth).
-		MaxWidth(leftWidth)
+		MaxWidth(leftWidth).
+		Height(contentHeight)
 	mapContent := m.renderGlobalMap()
 	boxContent := boxStyle.Render(dashboardTitleStyle.Render("GLOBAL THREAT MAP") + "\n\n" + mapContent)
 
@@ -687,7 +695,7 @@ func (m Model) globalView() string {
 	)
 	var mainContent string
 	if rightWidth > 0 {
-		rightPanel := m.renderGlobalRightPanel(rightWidth)
+		rightPanel := m.renderGlobalRightPanel(rightWidth, contentHeight)
 		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, boxContent, "  ", rightPanel)
 	} else {
 		mainContent = boxContent
@@ -700,12 +708,17 @@ func (m Model) configView() string {
 	if bodyWidth < 40 {
 		bodyWidth = 40
 	}
+	contentHeight := m.TermHeight - 10
+	if contentHeight < 10 {
+		contentHeight = 10
+	}
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(subtle).
 		Padding(0, 1).
 		Width(bodyWidth - 2).
-		MaxWidth(bodyWidth - 2)
+		MaxWidth(bodyWidth - 2).
+		Height(contentHeight)
 	path := m.ConfigPath
 	if path == "" {
 		path = "config.yaml"
@@ -721,6 +734,7 @@ func (m Model) configView() string {
 			content += "Hot-reload: " + warningStyle.Render("off") + ". Press " + footerKeyStyle.Render("R") + " to reload config."
 		}
 	}
+	content += "\n\n" + lipgloss.NewStyle().Foreground(subtle).Render("APIM_CONFIG env overrides default path.")
 	boxContent := boxStyle.Render(dashboardTitleStyle.Render("LIVE CONFIGURATION (YAML)") + "\n\n" + content)
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("CONFIG"),
@@ -734,12 +748,17 @@ func (m Model) portalView() string {
 	if bodyWidth < 40 {
 		bodyWidth = 40
 	}
+	contentHeight := m.TermHeight - 10
+	if contentHeight < 10 {
+		contentHeight = 10
+	}
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(subtle).
 		Padding(0, 1).
 		Width(bodyWidth - 2).
-		MaxWidth(bodyWidth - 2)
+		MaxWidth(bodyWidth - 2).
+		Height(contentHeight)
 	defs := m.Store.ListDefinitions()
 	pubCount := 0
 	withSpec := 0
@@ -753,7 +772,9 @@ func (m Model) portalView() string {
 	if pubCount > 0 {
 		docPct = fmt.Sprintf("%d%%", (withSpec*100)/pubCount)
 	}
-	content := fmt.Sprintf("Public APIs: %d\nDocumentation: %s\nStatus: %s", pubCount, docPct, specialStyle.Render("LIVE"))
+	content := fmt.Sprintf("Public APIs: %d\nDocumentation: %s\nStatus: %s\n\n%s",
+		pubCount, docPct, specialStyle.Render("LIVE"),
+		lipgloss.NewStyle().Foreground(subtle).Render("Served at /devportal when enabled in config."))
 	boxContent := boxStyle.Render(dashboardTitleStyle.Render("DEVELOPER PORTAL") + "\n\n" + content)
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("PORTAL"),
@@ -887,11 +908,16 @@ func (m Model) adminView() string {
 	if bodyWidth < 60 {
 		bodyWidth = 60
 	}
+	contentHeight := m.TermHeight - 12
+	if contentHeight < 14 {
+		contentHeight = 14
+	}
+	cardHeight := contentHeight - 3
 	cardWidth := (bodyWidth - 8) / 3
 	if cardWidth < 24 {
 		cardWidth = 24
 	}
-	cardStyle := columnStyle.MarginRight(0).Width(cardWidth)
+	cardStyle := columnStyle.MarginRight(0).Width(cardWidth).Height(cardHeight)
 
 	prods := m.Store.ListProducts()
 	prodContent := "PRODUCTS:\n"
@@ -902,12 +928,14 @@ func (m Model) adminView() string {
 		}
 		prodContent += fmt.Sprintf("• [%-10s] %-20s (%s)\n", p.Slug, p.Name, status)
 	}
+	prodContent += "\n" + lipgloss.NewStyle().Foreground(subtle).Render("F4 Traffic | F7 Health")
 
 	defs := m.Store.ListDefinitions()
 	defContent := "API DEFINITIONS:\n"
 	for _, d := range defs {
 		defContent += fmt.Sprintf("• %-20s -> %s\n", d.Name, d.BackendURL)
 	}
+	defContent += "\n" + lipgloss.NewStyle().Foreground(subtle).Render("Backends from config")
 
 	subs := m.Store.ListSubscriptions()
 	tenants := m.Store.UniqueTenantIDs()
@@ -924,16 +952,24 @@ func (m Model) adminView() string {
 	} else {
 		subContent += "TENANTS: (none)"
 	}
+	subContent += "\n\n" + lipgloss.NewStyle().Foreground(subtle).Render("X-Api-Key per subscription")
 
 	cardsRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("CATALOG"), prodContent)),
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("ROUTING"), defContent)),
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("CLIENTS"), subContent)),
 	)
+	summaryBar := lipgloss.NewStyle().
+		Foreground(subtle).
+		Width(bodyWidth - 2).
+		Render(fmt.Sprintf("Products: %d  |  APIs: %d  |  Subscriptions: %d  |  Tenants: %d",
+			len(prods), len(defs), len(subs), len(tenants)))
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("ADMIN"),
 		"",
 		cardsRow,
+		"",
+		summaryBar,
 	)
 }
 
@@ -942,11 +978,16 @@ func (m Model) securityView() string {
 	if bodyWidth < 60 {
 		bodyWidth = 60
 	}
+	contentHeight := m.TermHeight - 12
+	if contentHeight < 14 {
+		contentHeight = 14
+	}
+	cardHeight := contentHeight - 3
 	cardWidth := (bodyWidth - 8) / 3
 	if cardWidth < 24 {
 		cardWidth = 24
 	}
-	cardStyle := columnStyle.MarginRight(0).Width(cardWidth)
+	cardStyle := columnStyle.MarginRight(0).Width(cardWidth).Height(cardHeight)
 
 	cfg := m.Gateway.GetSecurity()
 
@@ -961,6 +1002,7 @@ func (m Model) securityView() string {
 		}
 		blacklistContent += fmt.Sprintf("• %s\n", warningStyle.Render(ip))
 	}
+	blacklistContent += "\n" + lipgloss.NewStyle().Foreground(subtle).Render("B / A in Traffic to blacklist IP")
 
 	regions := "ALLOWED REGIONS:\n"
 	if len(cfg.AllowedCountries) == 0 {
@@ -968,23 +1010,32 @@ func (m Model) securityView() string {
 	} else {
 		regions += fmt.Sprintf("  %s\n", strings.Join(cfg.AllowedCountries, ", "))
 	}
+	regions += "\n" + lipgloss.NewStyle().Foreground(subtle).Render("Empty = all countries allowed")
 
 	limits := fmt.Sprintf("RATE LIMITING: %s\n", specialStyle.Render("ENABLED"))
 	limits += fmt.Sprintf("RPS: %.2f | Burst: %d\n", cfg.RateLimit.RPS, cfg.RateLimit.Burst)
+	limits += "\n" + lipgloss.NewStyle().Foreground(subtle).Render("Per-IP token bucket")
 
 	cardsRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("IP PROTECTION"), blacklistContent)),
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("GEO-FENCING"), regions)),
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("THROTTLING"), limits)),
 	)
-	controls := "\n" + footerKeyStyle.Render("C") + footerActionStyle.Render("Clear Blacklist") + "  " +
-		footerKeyStyle.Render("G") + footerActionStyle.Render("Toggle Global Geo")
-
+	summaryBar := lipgloss.NewStyle().
+		Foreground(subtle).
+		Width(bodyWidth - 2).
+		Render(fmt.Sprintf("Blocked: %d  |  Rate limited: %d  |  Blacklist entries: %d",
+			m.Blocked, m.RateLimited, len(cfg.IPBlacklist)))
+	controls := footerKeyStyle.Render("C") + footerActionStyle.Render(" Clear Blacklist") + "  " +
+		footerKeyStyle.Render("G") + footerActionStyle.Render(" Toggle Global Geo")
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("SECURITY"),
 		"",
 		cardsRow,
-		controls,
+		"",
+		summaryBar,
+		"",
+		lipgloss.NewStyle().Foreground(subtle).Render(controls),
 	)
 }
 
@@ -993,11 +1044,24 @@ func (m Model) healthView() string {
 	if bodyWidth < 60 {
 		bodyWidth = 60
 	}
+	contentHeight := m.TermHeight - 12
+	if contentHeight < 14 {
+		contentHeight = 14
+	}
+	row1Height := contentHeight/2 - 2
+	if row1Height < 8 {
+		row1Height = 8
+	}
+	row2Height := contentHeight - row1Height - 4
+	if row2Height < 6 {
+		row2Height = 6
+	}
 	cardWidth := (bodyWidth - 4) / 2
 	if cardWidth < 28 {
 		cardWidth = 28
 	}
-	cardStyle := columnStyle.MarginRight(0).Width(cardWidth)
+	cardStyle := columnStyle.MarginRight(0).Width(cardWidth).Height(row1Height)
+	usageCardStyle := columnStyle.MarginRight(0).Width(bodyWidth - 2).Height(row2Height)
 
 	health := fmt.Sprintf("Admin API: %s\n", specialStyle.Render("OK"))
 	health += fmt.Sprintf("Gateway:   %s\n", specialStyle.Render("OK"))
@@ -1074,7 +1138,7 @@ func (m Model) healthView() string {
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("SERVICES"), health)),
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("METRICS"), metrics)),
 	)
-	cardsRow2 := cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("USAGE"), metrics2))
+	cardsRow2 := usageCardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("USAGE"), metrics2))
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("HEALTH"),
 		"",
