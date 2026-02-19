@@ -1,72 +1,126 @@
-# APIM Core 🚀
+# APIM Core
 
-**APIM Core** is a lightweight, high-performance, and Go-native API Management solution designed for modern distributed architectures. It provides a robust Gateway with a built-in interactive Management Hub (TUI), enabling real-time monitoring and control of your API ecosystem.
-
-Inspired by industry leaders like Apache APISIX, APIM Core brings a modular middleware engine and a powerful YAML-driven configuration system to your local environment.
+APIM Core is a lightweight, high-performance API gateway written in Go. It provides a single entry point for your APIs with key-based access control, rate limiting, and an optional terminal UI (TUI) for monitoring and administration. Configuration is YAML-driven with hot-reload; no database is required.
 
 ---
 
-## ✨ Key Features
+## Features
 
-- 🛡️ **Advanced Security**: Built-in IP Blacklisting, CIDR blocking, and Anti-DDoS rate limiting.
-- 🌍 **Geo-fencing**: Regional access control based on GeoIP resolution (mocked in core, production-ready logic).
-- ⛓️ **Middleware Engine**: Flexible request processing pipeline for easy expansion.
-- 🚦 **Multi-tenancy**: First-class support for tenant-based routing and metrics.
-- 🎮 **Turbo Management Hub (TUI)**: A comprehensive console for real-time monitoring, traffic analysis, and administration.
-- 📦 **Plug-and-Play**: Single binary with no external dependencies (Redis/DB optional for persistence).
-
----
-
-## 🛠️ Getting Started
-
-### Prerequisites
-- Go 1.22+
-
-### Quick Start
-1. **Clone and Build**:
-   ```bash
-   git clone https://github.com/navante-solutions/apimcore.git
-   cd apimcore
-   go build ./cmd/apim
-   ```
-
-2. **Run with Default Config**:
-   ```bash
-   ./apim --config config.yaml --tui
-   ```
-
-3. **Explore the TUI**:
-   Press `F3` to open the Navigation Menu and explore Dashboard, Traffic, Admin, and Security views.
+- **API gateway**: Path-based routing, API key validation, and configurable backends per product
+- **Security**: IP blacklisting, CIDR support, and rate limiting (RPS/burst)
+- **Geo-fencing**: Regional access control based on GeoIP (extensible for production providers)
+- **Multi-tenancy**: Tenant-aware routing and metrics
+- **Management TUI**: Real-time dashboard, traffic view, admin and security panels
+- **Developer portal**: Optional embedded portal for API documentation
+- **Observability**: Prometheus metrics and health endpoints
+- **Hot-reload**: Edit `config.yaml` and see changes applied without restart
 
 ---
 
-## 🎮 The TUI Management Hub
+## Requirements
 
-APIM Core features a state-of-the-art terminal interface (TUI) for management:
-
-- **Dashboard (F3 Menu)**: System vitals, uptime, and real-time event logs.
-- **Traffic Monitor (F4)**: Wireshark-style request inspector with GeoIP flags and security highlighting.
-- **Administration (F5)**: Live view of Products, API Definitions, and Subscriptions.
-- **Security Control (F6)**: Interactive management of Blacklists and Geo-fencing policies.
-- **System Health (F7)**: Integrated health checks and internal metrics.
+- **Go 1.24+** (for building from source)
+- **Docker** (optional, for containerized runs)
 
 ---
 
-## ⚙️ Configuration scenarios
+## Quick start
 
-We provide a library of configuration examples in the `/examples` directory:
+### Using the binary (recommended)
 
-- [basic.yaml](examples/basic.yaml): Simple one-product, one-API setup.
-- [security.yaml](examples/security.yaml): Strict rate limits and IP protection.
-- [multi-tenant.yaml](examples/multi_tenant.yaml): Complex Enterprise-grade multi-tenant configuration.
-- [geo-fencing.yaml](examples/geo_fencing.yaml): Regional access control (e.g., EU-only vs Global).
+Download the latest release for your platform from [Releases](https://github.com/Navante-Solutions/apimCore/releases), then:
+
+```bash
+./apim --config config.yaml --tui
+```
+
+- Gateway: `http://localhost:8080`
+- Management and health: `http://localhost:8081`
+
+### From source
+
+```bash
+git clone https://github.com/Navante-Solutions/apimCore.git
+cd apimCore
+go build -o apim ./cmd/apim
+./apim --config config.yaml --tui
+```
+
+### Using Docker
+
+```bash
+docker run -p 8080:8080 -p 8081:8081 -v $(pwd)/config.yaml:/etc/apim/config.yaml ghcr.io/navante-solutions/apimcore:latest
+```
+
+Set `APIM_CONFIG` if your config path differs. See [Getting started](docs/getting-started.md) for details.
 
 ---
 
-## 🤝 Contributing
+## Configuration
 
-We welcome contributions! Please feel free to submit Pull Requests or open issues for feature requests and bug reports.
+APIM Core is configured via a single YAML file (default: `config.yaml`). Main sections:
 
-## 📄 License
+| Section        | Purpose                                  |
+|----------------|------------------------------------------|
+| `gateway`      | Listen address for the API proxy         |
+| `server`       | Listen address for admin, metrics, portal |
+| `products`     | API products and backend routes          |
+| `subscriptions`| API keys and product access              |
+| `security`     | Rate limits, IP blacklist, geo-fencing   |
+| `devportal`    | Developer portal path and toggle         |
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Full reference: [Configuration guide](docs/configuration.md). Example configs: [docs/examples](docs/examples/).
+
+---
+
+## Management TUI
+
+With `--tui`, APIM Core starts an in-process terminal UI. Use **F3** for the main menu.
+
+| View           | Shortcut | Description                          |
+|----------------|----------|--------------------------------------|
+| Dashboard      | F3       | Overview, uptime, event log          |
+| Traffic        | F4       | Request list with status and GeoIP   |
+| Administration | F5       | Products, APIs, subscriptions        |
+| Security       | F6       | Blacklist and geo-fencing            |
+| System health  | F7       | Health and metrics                   |
+
+---
+
+## Ports and endpoints
+
+| Port  | Purpose                    | Endpoints (examples)        |
+|-------|----------------------------|-----------------------------|
+| 8080  | API gateway (proxy)        | Your API paths              |
+| 8081  | Management and metrics     | `/health`, `/metrics`, Admin API, Dev Portal |
+
+Example:
+
+```bash
+curl http://localhost:8081/health
+```
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Getting started](docs/getting-started.md) | Install, run, and first checks |
+| [Configuration](docs/configuration.md)   | Config file reference and behavior |
+| [Architecture](docs/architecture.md)     | Components and data flow |
+| [Production readiness](docs/tui-production-readiness.md) | TUI and gateway production checklist |
+
+Example configurations: [docs/examples](docs/examples/) (basic, security, multi-tenant, geo-fencing).
+
+---
+
+## Contributing
+
+Contributions are welcome. Please open an issue or pull request on [GitHub](https://github.com/Navante-Solutions/apimCore).
+
+---
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

@@ -1,55 +1,94 @@
-# Getting Started with APIM Core
+# Getting started with APIM Core
 
-APIM Core is a lightweight, high-performance API Gateway designed for the Navante solution. It provides a single entry point for multiple backends, request metering, and a developer portal.
+This guide walks you through installing and running APIM Core. For configuration details, see [Configuration](configuration.md). For an overview of the system, see [Architecture](architecture.md).
 
 ## Prerequisites
 
-- [Go](https://go.dev/) 1.22 or higher.
-- [Docker](https://www.docker.com/) (optional, for containerized deployment).
+- [Go](https://go.dev/) 1.24 or higher (for building from source)
+- [Docker](https://www.docker.com/) (optional, for containerized deployment)
 
 ## Installation
 
+### Option 1: Pre-built binary
+
+1. Open [Releases](https://github.com/Navante-Solutions/apimCore/releases).
+2. Download the archive for your OS and architecture (e.g. `apimCore_linux_amd64.tar.gz`).
+3. Extract and run:
+   ```bash
+   tar -xzf apimCore_linux_amd64.tar.gz
+   ./apim --config config.yaml --tui
+   ```
+
+### Option 2: Build from source
+
 1. Clone the repository:
    ```bash
-   git clone https://github.com/navantesolutions/apimCore.git
+   git clone https://github.com/Navante-Solutions/apimCore.git
    cd apimCore
    ```
 
-2. Download dependencies:
+2. Download dependencies and build:
    ```bash
    go mod tidy
-   ```
-
-3. Build the application:
-   ```bash
    go build -o apim ./cmd/apim
    ```
 
-## Running the Application
+3. Run with your config and optional TUI:
+   ```bash
+   ./apim --config config.yaml --tui
+   ```
 
-### Local Mode
+### Option 3: Docker
 
-Start the APIM using the default `config.yaml`:
-```bash
-./apim
-```
+1. Build the image (or use a published image):
+   ```bash
+   docker build -t apimcore:latest .
+   ```
 
-### Docker Mode
+2. Run with config mounted:
+   ```bash
+   docker run -p 8080:8080 -p 8081:8081 -v "$(pwd)/config.yaml:/etc/apim/config.yaml" apimcore:latest
+   ```
 
-Build and run using the provided Dockerfile:
-```bash
-docker build -t apimcore:latest .
-docker run -p 8080:8080 -p 8081:8081 apimcore:latest
-```
+   The default config path inside the container is `/etc/apim/config.yaml`. Override with:
+   ```bash
+   docker run -e APIM_CONFIG=/path/in/container/config.yaml ...
+   ```
 
-## Quick Test
+## Running the application
 
-By default, the gateway listens on `:8080` and the management server on `:8081`.
+- **Without TUI** (gateway and management server only):
+  ```bash
+  ./apim --config config.yaml
+  ```
 
-Send a health check request:
+- **With TUI** (adds the in-process management interface):
+  ```bash
+  ./apim --config config.yaml --tui
+  ```
+
+If `--config` is omitted, APIM Core looks for `config.yaml` in the current directory. You can also set the config path with the `APIM_CONFIG` environment variable.
+
+## Quick check
+
+By default the gateway listens on `:8080` and the management server on `:8081`.
+
+Health check:
+
 ```bash
 curl http://localhost:8081/health
 ```
-Response: `OK`
 
-Next, head over to the [Configuration Guide](configuration.md) to set up your APIs.
+Expected response: `OK`.
+
+Prometheus metrics:
+
+```bash
+curl http://localhost:8081/metrics
+```
+
+## Next steps
+
+- Copy or adapt an [example configuration](examples/) and point `--config` at it.
+- Read the [Configuration guide](configuration.md) to define products, APIs, subscriptions, and security.
+- Use the TUI (with `--tui`) to explore the dashboard, traffic, and admin views (F3 for the menu).

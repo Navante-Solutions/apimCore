@@ -1,184 +1,168 @@
-# Plano de implementação: TUI pronta para produção
+# Production readiness
 
-Este documento lista todos os mocks e dados fictícios na TUI e no pipeline de métricas, e o que implementar para ambiente real.
-
----
-
-## 1. Métricas de tráfico e latência
-
-### 1.1 AvgLatency zerado (main.go + hub)
-
-**Onde:** `cmd/apim/main.go` envia `AvgLatency: 0` no ticker para a TUI e para `hub.SystemStats`.
-
-**O que fazer:**
-- Expor no **meter** uma função que calcule a latência média a partir do uso (ex.: `AvgLatencySince(since time.Time) float64`).
-- O store já guarda `ResponseTimeMs` em `RequestUsage`; em `UsageSince` podemos somar e dividir pelo total.
-- No ticker de métricas em `main.go`, chamar `m.AvgLatencySince(time.Now().Add(-1*time.Hour))` e preencher `AvgLatency` (em ms) em `MetricsUpdateMsg` e `hub.SystemStats`.
-
-**Arquivos:** `internal/meter/meter.go` (nova função ou uso de store), `internal/store/store.go` (opcional helper), `cmd/apim/main.go`.
+This document lists current mocks and placeholders in the TUI and gateway pipeline, and what is required to run APIM Core with real data in production. It is intended for operators and contributors who need to harden deployments or implement the missing pieces.
 
 ---
 
-## 2. CPU e memória (System Vitals)
+## 1. Traffic and latency metrics
 
-### 2.1 CPU/RAM fixos no dashboard (tui.go)
+**Current state:** `AvgLatency` is sent as `0` in the TUI ticker and in `hub.SystemStats`.
 
-**Onde:** `internal/tui/tui.go` usa `cpuUsage = 0.42` e `ramUsage = 0.65` quando `m.CPUUsage`/`m.RAMUsage` são 0.
+**To implement:**
 
-**O que fazer:**
-- Esses valores vêm de `hub.SystemStats` (CPUUsage, MemoryUsageMB). O hub hoje só recebe dados do **Collector**, que está em mock.
-- Fonte real: usar **gopsutil** (ou leitura de `/proc` no Linux) no **hub.Collector** para preencher:
-  - `CPUUsage`: percentual (0–1) via `cpu.Percent()` ou equivalente.
-  - `MemoryUsageMB`: uso em MB via `mem.VirtualMemory()`.
-- Iniciar o **Collector** em `main.go` quando TUI estiver ativa e injetar o Hub; chamar `PublishStats` com dados reais no tick do Collector.
-- Na TUI, manter o fallback 0.42/0.65 apenas quando nenhum `SystemStats` tiver sido recebido ainda (ex.: antes do primeiro tick).
+- In the meter, expose a function that computes average latency from usage (e.g. `AvgLatencySince(since time.Time) float64`). The store already records `ResponseTimeMs` in `RequestUsage`; aggregate in a time window (e.g. last hour).
+- In the metrics ticker in `main.go`, call that function and set `AvgLatency` (in ms) in `MetricsUpdateMsg` and `hub.SystemStats`.
 
-**Arquivos:** `internal/hub/hub.go` (Collector com gopsutil), `cmd/apim/main.go` (iniciar Collector com Hub), `internal/tui/tui.go` (manter fallback apenas inicial).
+**Relevant:** `internal/meter/meter.go`, `internal/store/store.go`, `cmd/apim/main.go`.
 
 ---
 
-## 3. Rate limit e bloqueios (Security / Traffic)
+## 2. CPU and memory (system vitals)
 
-### 3.1 RateLimited e Blocked sempre zerados
+**Current state:** Dashboard uses fallback values (e.g. 0.42 / 0.65) when `CPUUsage` / `RAMUsage` are zero. The hub Collector currently sends mock data.
 
-**Onde:** `hub.SystemStats` tem `RateLimited` e `Blocked`; a TUI mostra esses campos. O gateway não envia eventos quando retorna 429/403.
+**To implement:**
 
-**O que fazer:**
-- **Opção A (recomendada):** No gateway, ao responder 429 (rate limit) ou 403 (blacklist/geo), chamar `Hub.PublishTraffic` com um `TrafficEvent` com `Status` 429 ou 403 e `Action` "RATE_LIMIT" ou "BLOCKED". Manter contadores em memória no gateway (por ex. `atomic` ou `sync` por tipo) e incluir no `SystemStats` (ex.: novo campo no gateway ou no hub que agregue por janela de tempo).
-- **Opção B:** Manter apenas eventos de tráfego e agregar na TUI ou num agregador: contar eventos com `Action == "RATE_LIMIT"` e `Action == "BLOCKED"` na janela (ex.: última hora) e enviar em `SystemStats`.
-- Para **SystemStats** no main: ou o gateway expõe contadores (ex.: interface `Stats() (rateLimited, blocked int64)`) e o ticker envia para o hub, ou um componente central lê do store/hub e envia `RateLimited`/`Blocked` no `SystemStats`.
+- Use a system library (e.g. `github.com/shirou/gopsutil/v3`) in the hub Collector to read real CPU percent and memory (e.g. `mem.VirtualMemory()`).
+- Start the Collector in `main.go` when the TUI is active and inject the hub; call `PublishStats` with real values on each tick.
+- In the TUI, keep the fallback only until the first real `SystemStats` is received.
 
-**Arquivos:** `internal/gateway/gateway.go` (emitir evento 429/403 + opcionalmente contadores), `internal/gateway/security.go` (passar Hub ou callback para publicar evento), `internal/hub/hub.go` / `cmd/apim/main.go` (preencher SystemStats).
-
----
-
-## 4. Nó e cluster (Security card)
-
-### 4.1 "US-EAST-1A" e "12 ACTIVE" fixos
-
-**Onde:** `internal/tui/tui.go` (security card): `NODE: US-EAST-1A`, `NODES: 12 ACTIVE`.
-
-**O que fazer:**
-- **NODE:** Ler de variável de ambiente (ex.: `APIM_NODE_ID` ou `HOSTNAME`); se vazio, usar `hostname` do OS ou "local".
-- **NODES:** Em cenário single-node, mostrar "1" ou "N/A". Para multi-node, exigir uma fonte (ex.: config, API de cluster ou env `APIM_CLUSTER_NODES`); até lá, mostrar "1" ou "single node".
-- TUI: receber esses valores por parâmetro no Model (ex.: `NodeID`, `ClusterNodeCount`) preenchidos em `main.go` a partir de config/env.
-
-**Arquivos:** `config/config.go` (opcional: `NodeID`, `ClusterNodes`), `cmd/apim/main.go` (ler env/config e passar para TUI), `internal/tui/tui.go` (usar campos do Model).
+**Relevant:** `internal/hub/hub.go`, `cmd/apim/main.go`, `internal/tui/tui.go`.
 
 ---
 
-## 5. Sparkline (Performance trend)
+## 3. Rate limit and blocked counters
 
-### 5.2 Dados fixos [10, 20, 15, 30, 25]
+**Current state:** `RateLimited` and `Blocked` in `SystemStats` are not updated; the gateway does not emit events when returning 429 or 403.
 
-**Onde:** `internal/tui/tui.go`: `m.renderSparkline([]int64{10, 20, 15, 30, 25}, sparkWidth)`.
+**To implement:**
 
-**O que fazer:**
-- Manter um buffer no Model (ex.: `RequestCountsLastN []int64` ou por minuto) atualizado pelo ticker: a cada intervalo (ex.: 1 min), anotar total de requests no período e adicionar ao buffer (cap ex.: 20 pontos).
-- No main, ao enviar métricas para a TUI, enviar também um valor “requests no último intervalo” (ou a TUI usa `TotalRequests` e deriva diferença entre ticks).
-- Alternativa: meter/store expõe “total por minuto nos últimos N minutos”; TUI chama ou recebe via msg e usa para o sparkline.
+- In the gateway, when responding with 429 (rate limit) or 403 (blacklist/geo), call `Hub.PublishTraffic` with a `TrafficEvent` with the appropriate status and action (e.g. "RATE_LIMIT", "BLOCKED"). Maintain in-memory counters (e.g. atomic or sync) and include them in `SystemStats` (either from the gateway or an aggregator).
+- Alternatively, aggregate from traffic events in the TUI or a central component over a time window and feed into `SystemStats`.
 
-**Arquivos:** `internal/tui/tui.go` (buffer + nova msg ou uso de métricas existentes), `cmd/apim/main.go` (enviar contagem por intervalo se necessário).
+**Relevant:** `internal/gateway/gateway.go`, `internal/gateway/security.go`, `internal/hub/hub.go`, `cmd/apim/main.go`.
+
+---
+
+## 4. Node and cluster (security card)
+
+**Current state:** TUI shows fixed values such as "NODE: US-EAST-1A" and "NODES: 12 ACTIVE".
+
+**To implement:**
+
+- **NODE:** Read from environment (e.g. `APIM_NODE_ID` or `HOSTNAME`); if unset, use OS hostname or "local".
+- **NODES:** For single-node, show "1" or "N/A". For multi-node, use a config or cluster API (e.g. `APIM_CLUSTER_NODES`); until then, show "1" or "single node".
+- Pass these values into the TUI model from `main.go` (config or env).
+
+**Relevant:** `config/config.go`, `cmd/apim/main.go`, `internal/tui/tui.go`.
+
+---
+
+## 5. Sparkline (performance trend)
+
+**Current state:** Sparkline uses fixed data `[10, 20, 15, 30, 25]`.
+
+**To implement:**
+
+- Keep a rolling buffer in the TUI model (e.g. request count per minute, last N points). Each tick, append the count for the last interval and trim to cap.
+- Either the meter/store exposes "requests per interval for last N intervals", or the main ticker sends "requests in last interval" and the TUI builds the series.
+
+**Relevant:** `internal/tui/tui.go`, `cmd/apim/main.go`.
 
 ---
 
 ## 6. Config view
 
-### 6.1 "Loaded from: config.yaml" e "(Editable Console - Coming Soon)"
+**Current state:** Config view shows a fixed path and "Editable Console - Coming Soon".
 
-**Onde:** `internal/tui/configView()`: path fixo e texto "Coming Soon".
+**To implement:**
 
-**O que fazer:**
-- **Path:** Receber o path real de config no Model (ex.: `ConfigPath string` preenchido em main a partir de `configPath`). Exibir: "Loaded from: " + m.ConfigPath (ou "default: config.yaml" se vazio).
-- **Edição:** Para produção, definir se haverá editor in-app (arriscado) ou apenas "View-only; edit config file and reload with [R]". Por agora, trocar para "View-only. Edit file and press [R] to reload."
+- Pass the actual config path into the TUI model (e.g. `ConfigPath`) and display "Loaded from: " + path (or "default: config.yaml" if empty).
+- For production: either keep view-only with text like "View-only. Edit file and press [R] to reload.", or design a safe in-app edit flow.
 
-**Arquivos:** `internal/tui/tui.go` (Model.ConfigPath, configView), `cmd/apim/main.go` (passar configPath ao criar Model).
+**Relevant:** `internal/tui/tui.go`, `cmd/apim/main.go`.
 
 ---
 
-## 7. Developer Portal view
+## 7. Developer portal view
 
-### 7.1 "Public APIs: 2", "Documentation: 85%", "Status: LIVE"
+**Current state:** Placeholder values for "Public APIs", "Documentation %", "Status".
 
-**Onde:** `internal/tui/portalView()`.
+**To implement:**
 
-**O que fazer:**
-- **Public APIs:** Usar `len(m.Store.ListDefinitions())` ou contar apenas APIs de produtos publicados (já existe store).
-- **Documentation:** Se houver campo ou regra (ex.: definições com `OpenAPISpecURL != ""`), calcular percentual (ex.: X de Y com spec). Caso contrário, exibir "N/A" ou remover até existir dado real.
-- **Status:** Manter "LIVE" se o servidor estiver no ar; opcionalmente derivar de health check interno.
+- **Public APIs:** Use `len(store.ListDefinitions())` or count only published product APIs.
+- **Documentation:** If definitions have a spec URL or similar, compute the share with docs; otherwise show "N/A".
+- **Status:** Derive from process/health (e.g. "LIVE" when server is up).
 
-**Arquivos:** `internal/tui/tui.go` (portalView usando Store).
+**Relevant:** `internal/tui/tui.go`, store API.
 
 ---
 
 ## 8. Admin view – tenants
 
-### 8.1 "TENANTS: Walmart, Target, Acme" fixo
+**Current state:** Tenants list is hardcoded (e.g. "Walmart, Target, Acme").
 
-**Onde:** `internal/tui/adminView()`: `subContent += "TENANTS: Walmart, Target, Acme"`.
+**To implement:**
 
-**O que fazer:**
-- Obter lista real de tenants: por ex. `store.ListSubscriptions()` e extrair `TenantID` únicos, ou adicionar `store.UniqueTenantIDs() []string` que percorre subscriptions (e opcionalmente usage) e retorna IDs únicos.
-- Exibir até N tenants (ex.: 5) e ", ..." se houver mais; ou "X tenants" como resumo.
+- Get unique tenant IDs from the store (e.g. from subscriptions and optional usage). Add a helper such as `store.UniqueTenantIDs() []string` if needed.
+- Display up to N tenants with ", ..." or a summary like "X tenants".
 
-**Arquivos:** `internal/store/store.go` (opcional: UniqueTenants), `internal/tui/tui.go` (adminView usa store).
-
----
-
-## 9. GeoIP (gateway + tráfego)
-
-### 9.1 Mock em GeoIPMiddleware
-
-**Onde:** `internal/gateway/security.go`: país "Local", "US" (8.8.8.8), ou "BR"/"DE" por paridade do IP.
-
-**O que fazer:**
-- Integrar um provedor real: MaxMind GeoLite2 (arquivo .mmdb + lib tipo `github.com/oschwald/geoip2-golang`), ou serviço HTTP de geolocalização.
-- Config: ex.: `config.GeoIP.DBPath` ou `GeoIP.Provider` (maxmind/http). No middleware, resolver país pelo IP e setar header + aplicar geo-fencing com o código real.
-- Tráfego na TUI já usa `Country` do evento; passará a refletir o país real.
-
-**Arquivos:** `config/config.go` (GeoIP), `internal/gateway/security.go` (GeoIPMiddleware com DB/serviço), documentação de deploy (download de GeoLite2, etc.).
+**Relevant:** `internal/store/store.go`, `internal/tui/tui.go`.
 
 ---
 
-## 10. Uptime e SystemStats (hub Collector)
+## 9. GeoIP (gateway and traffic)
 
-### 10.1 Collector com dados mock
+**Current state:** GeoIP middleware uses mock resolution (e.g. "Local", "US" for 8.8.8.8, or derived from IP parity).
 
-**Onde:** `internal/hub/hub.go`: Collector envia `Uptime: time.Hour`, `CPUUsage: 0.45`, `MemoryUsageMB: 1240`, `ActiveConns: 42`, `GeoThreats` fixo.
+**To implement:**
 
-**O que fazer:**
-- Ver itens 2 (CPU/RAM com gopsutil) e 3 (RateLimited/Blocked).
-- **Uptime:** Calcular desde o start do processo (ex.: variável `processStartTime time.Time` em main ou no hub e enviar `time.Since(processStartTime)` no Collector).
-- **ActiveConns:** Opcional: usar `net/http` Server ConnState ou contador de conexões no gateway; ou omitir até haver implementação.
-- **GeoThreats:** Agregar do tráfego real (países com 4xx/5xx ou bloqueios); ou remover do SystemStats até existir agregador.
+- Integrate a real provider: MaxMind GeoLite2 (`.mmdb` + e.g. `github.com/oschwald/geoip2-golang`) or an HTTP geo service.
+- Add config (e.g. `GeoIP.DBPath` or `GeoIP.Provider`). In the middleware, resolve country from IP, set headers, and apply geo-fencing rules. TUI traffic view will then show real country data.
 
-**Arquivos:** `internal/hub/hub.go`, `cmd/apim/main.go`.
+**Relevant:** `config/config.go`, `internal/gateway/security.go`, deployment docs (e.g. GeoLite2 download).
 
 ---
 
-## 11. Resumo de dependências externas sugeridas
+## 10. Uptime and system stats (hub Collector)
 
-| Item              | Dependência sugerida        | Uso                    |
-|-------------------|-----------------------------|------------------------|
-| CPU / Memória     | `github.com/shirou/gopsutil/v3` | Collector system stats |
-| GeoIP             | `github.com/oschwald/geoip2-golang` + MaxMind DB | País real por IP   |
-| Config path       | Já existe `APIM_CONFIG`     | Só passar para TUI     |
-| Latência média    | Nenhuma (store + meter)      | AvgLatencySince        |
-| Sparkline         | Nenhuma (buffer no Model)   | Requests por intervalo |
-| Nó / cluster      | Env (APIM_NODE_ID, etc.)    | Security card          |
+**Current state:** Collector sends mock uptime, CPU, memory, active connections, and geo threats.
+
+**To implement:**
+
+- **Uptime:** Record process start time (e.g. in main or hub) and send `time.Since(processStartTime)` in the Collector.
+- **CPU/Memory:** See section 2 (gopsutil or equivalent).
+- **ActiveConns:** Optional: use server `ConnState` or gateway connection counters; or omit until implemented.
+- **RateLimited / Blocked:** See section 3.
+- **GeoThreats:** Aggregate from real traffic (e.g. blocked/error by country) or remove from SystemStats until an aggregator exists.
+
+**Relevant:** `internal/hub/hub.go`, `cmd/apim/main.go`.
 
 ---
 
-## 12. Ordem sugerida de implementação
+## 11. Suggested dependencies
 
-1. **Métricas reais (latência, requests):** meter/store + main (AvgLatency, sparkline buffer).
-2. **Config path e textos:** Model.ConfigPath, configView e portalView com dados do Store.
-3. **Admin tenants:** lista real de tenants a partir do store.
-4. **Portal (APIs, docs %):** contar definições e specs do store.
-5. **CPU/RAM:** gopsutil + Collector + iniciar Collector no main.
-6. **Rate limit / bloqueios:** gateway emite eventos 429/403 e contadores; SystemStats preenchido.
-7. **Nó/cluster:** env/config + TUI.
-8. **GeoIP:** config + middleware com MaxMind (ou outro).
-9. **Uptime/ActiveConns/GeoThreats:** ajustes finos no Collector e agregadores.
+| Area           | Dependency                          | Use case                |
+|----------------|-------------------------------------|-------------------------|
+| CPU / memory   | `github.com/shirou/gopsutil/v3`     | Collector system stats  |
+| GeoIP          | `github.com/oschwald/geoip2-golang` + MaxMind DB | Real country per IP |
+| Config path    | Existing `APIM_CONFIG`              | Pass through to TUI     |
+| Average latency| None (store + meter)                | `AvgLatencySince`       |
+| Sparkline      | None (buffer in model)              | Requests per interval   |
+| Node / cluster | Env (`APIM_NODE_ID`, etc.)          | Security card           |
 
-Com isso, a TUI deixa de depender de mocks e fica pronta para uso em produção com dados reais.
+---
+
+## 12. Suggested implementation order
+
+1. Real metrics: latency and request counts (meter/store + main: AvgLatency, sparkline buffer).
+2. Config path and copy: Model.ConfigPath, config view and portal view from store.
+3. Admin tenants: real tenant list from store.
+4. Portal: API count and documentation % from store.
+5. CPU/RAM: gopsutil in Collector, started from main.
+6. Rate limit / blocked: gateway emits 429/403 events and counters; feed into SystemStats.
+7. Node/cluster: env or config and TUI.
+8. GeoIP: config + middleware with MaxMind (or other provider).
+9. Uptime, ActiveConns, GeoThreats: finalize Collector and aggregators.
+
+With these in place, the TUI and gateway can run in production with real data and no mocks.

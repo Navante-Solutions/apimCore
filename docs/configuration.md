@@ -1,32 +1,36 @@
-# Configuration Guide
+# Configuration guide
 
-APIM Core is powered by a declarative `config.yaml` file. This allows you to manage your entire API infrastructure without directly interacting with a frontend or database.
+APIM Core is driven by a single declarative YAML file. You manage products, APIs, subscriptions, and security without a separate database or admin UI (although the TUI and Admin API can expose this state). By default the file is named `config.yaml`; you can override it with `--config` or the `APIM_CONFIG` environment variable.
 
-## Configuration File Structure
+## File structure
 
-The `config.yaml` is divided into four main sections: `gateway`, `server`, `products`, and `subscriptions`.
+The config file is organized into sections: `gateway`, `server`, `products`, `subscriptions`, and optionally `security` and `devportal`.
 
-### Gateway Section
+## Gateway
 
-Defines the network settings for the API Gateway (the proxy).
+Configures the API proxy (inbound traffic to your backends).
 
 ```yaml
 gateway:
-  listen: ":8080" # The address the gateway will listen on
+  listen: ":8080"
 ```
 
-### Server Section
+- `listen`: Address and port the gateway binds to (e.g. `:8080` or `0.0.0.0:8080`).
 
-Defines the network settings for the management server (Admin API, Dev Portal, Metrics).
+## Server
+
+Configures the management server (health, metrics, Admin API, Developer Portal).
 
 ```yaml
 server:
   listen: ":8081"
 ```
 
-### Products and APIs
+- `listen`: Address and port for the management server.
 
-This is the heart of your configuration. APIs are grouped into "Products" for logical management and access control.
+## Products and APIs
+
+APIs are grouped into **products**. Each product has a unique `slug` and a list of APIs, each with a path prefix and backend URL.
 
 ```yaml
 products:
@@ -42,36 +46,81 @@ products:
         target_url: "http://localhost:8083"
 ```
 
-- `slug`: A unique identifier for the product.
-- `path_prefix`: Requests matching this prefix will be routed to the `target_url`.
+- `slug`: Unique identifier for the product (used in subscriptions).
+- `path_prefix`: URL path prefix; requests starting with this path are routed to the given backend.
+- `target_url`: Backend base URL for that API.
 
-### Subscriptions and Keys
+## Subscriptions and API keys
 
-Manage access to your products using pre-defined keys.
+Access to products is granted via **subscriptions** and **keys**. Clients send a key in the `X-Api-Key` header.
 
 ```yaml
 subscriptions:
   - developer_id: "default-dev"
-    product_slug: "edu" # Must match a product slug
+    product_slug: "edu"
     plan: "premium"
     keys:
       - name: "Default Key"
         value: "dev-key-123"
 ```
 
-- `value`: The actual string used in the `X-Api-Key` header.
+- `product_slug`: Must match a product `slug`.
+- `keys[].value`: Secret sent by the client in `X-Api-Key`. Validate and protect these like passwords.
 
-## Dynamic Hot-Reloading
+## Security
 
-One of the most powerful features of APIM Core is **Hot-Reloading**. You can edit `config.yaml` while the server is running, and the changes will be applied automatically within seconds without a restart.
+Optional section for rate limiting, IP blacklist, and geo-fencing.
 
-Try changing a `target_url` or adding a new key, save the file, and observe the logs:
+- **Rate limit**: Global or per-tenant RPS and burst.
+- **IP blacklist**: Block specific IPs or CIDR ranges.
+- **Geo-fencing**: Allow or deny regions (requires GeoIP resolution; see [Production readiness](tui-production-readiness.md) for real GeoIP).
+
+Example (see [examples/security.yaml](examples/security.yaml) for a full sample):
+
+```yaml
+security:
+  ip_blacklist: []
+  rate_limit:
+    enabled: true
+    rps: 10
+    burst: 20
+```
+
+## Developer portal
+
+Optional embedded developer portal for API documentation.
+
+```yaml
+devportal:
+  enabled: true
+  path: /devportal
+```
+
+- `path`: URL path where the portal is served (e.g. `http://localhost:8081/devportal`).
+
+## Hot-reload
+
+APIM Core watches the config file. When you save changes, it reloads the configuration automatically (typically within a few seconds). You will see a log line like:
+
 `config file changed, reloading...`
 
-## Environment Variables
+No restart is required. Use this to add products, APIs, keys, or adjust security settings.
 
-You can override certain settings via environment variables:
+## Environment variables
 
-- `APIM_CONFIG`: Path to the config file (default: `config.yaml`).
-- `APIM_GATEWAY_LISTEN`: Override `gateway.listen`.
-- `APIM_SERVER_LISTEN`: Override `server.listen`.
+| Variable | Description |
+|----------|-------------|
+| `APIM_CONFIG` | Path to the config file (default: `config.yaml`). |
+| `APIM_GATEWAY_LISTEN` | Override `gateway.listen`. |
+| `APIM_SERVER_LISTEN` | Override `server.listen`. |
+
+## Example configs
+
+Ready-to-use examples are in [docs/examples](examples/):
+
+- [basic.yaml](examples/basic.yaml): One product, one API, minimal security.
+- [security.yaml](examples/security.yaml): Stricter rate limits and IP protection.
+- [multi_tenant.yaml](examples/multi_tenant.yaml): Multiple products and tenants.
+- [geo_fencing.yaml](examples/geo_fencing.yaml): Regional access control.
+
+Copy one and adapt paths, backends, and keys to your environment.
