@@ -32,10 +32,10 @@ Installers are automatically generated for each release:
 
 - **Linux (Ubuntu/Debian)**: `.deb` packages for x86_64 and ARM64
 - **Linux (RedHat/Fedora)**: `.rpm` packages for x86_64 and ARM64
-- **Windows**: `.exe` installers for x86_64, x86, and ARM64
+- **Windows**: `.zip` archives with the binary (x86_64, x86, ARM64)
 - **macOS**: `.tar.gz` archives for x86_64 and ARM64
 
-Download the appropriate installer from [Releases](https://github.com/Navante-Solutions/apimCore/releases):
+Download the appropriate package from [Releases](https://github.com/Navante-Solutions/apimCore/releases):
 
 **Linux (.deb):**
 ```bash
@@ -48,7 +48,7 @@ sudo rpm -i apimcore_*.rpm
 ```
 
 **Windows:**
-Run the `.exe` installer and follow the setup wizard.
+Extract the `.zip` for your architecture and run `apimcore.exe`.
 
 **macOS:**
 ```bash
