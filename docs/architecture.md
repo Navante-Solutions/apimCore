@@ -1,6 +1,6 @@
-# APIM Core architecture
+# ApimCore architecture
 
-APIM Core uses a modular layout with clear separation between configuration, state, gateway, metrics, and management. This document gives a high-level overview for operators and contributors.
+ApimCore uses a modular layout with clear separation between configuration, state, gateway, metrics, and management. This document gives a high-level overview for operators and contributors.
 
 ## Component overview
 

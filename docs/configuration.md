@@ -1,6 +1,6 @@
 # Configuration guide
 
-APIM Core is driven by a single declarative YAML file. You manage products, APIs, subscriptions, and security without a separate database or admin UI (although the TUI and Admin API can expose this state). By default the file is named `config.yaml`; you can override it with `--config` or the `APIM_CONFIG` environment variable.
+ApimCore is driven by a single declarative YAML file. You manage products, APIs, subscriptions, and security without a separate database or admin UI (although the TUI and Admin API can expose this state). By default the file is named `config.yaml`; you can override it with `-f` / `-config` (e.g. `apimcore -f ./config/myconfig.yml --tui`) or the `APIM_CONFIG` environment variable.
 
 ## File structure
 
@@ -13,9 +13,11 @@ Configures the API proxy (inbound traffic to your backends).
 ```yaml
 gateway:
   listen: ":8080"
+  backend_timeout_seconds: 30
 ```
 
 - `listen`: Address and port the gateway binds to (e.g. `:8080` or `0.0.0.0:8080`).
+- `backend_timeout_seconds`: Timeout for each request to a backend (default 30). Prevents stuck backends from holding connections; important in cloud/Kubernetes.
 
 ## Server
 
@@ -100,19 +102,33 @@ devportal:
 
 ## Hot-reload
 
-APIM Core watches the config file. When you save changes, it reloads the configuration automatically (typically within a few seconds). You will see a log line like:
+Hot-reload is **opt-in**. Start with `-hot-reload` to watch the config file and reload when it changes (about every 5 seconds). You will see a log line: `config file changed, reloading...`
 
-`config file changed, reloading...`
+Without `-hot-reload`, config is loaded once at startup. You can still reload manually by pressing **[R]** in the TUI, or restart the process.
 
-No restart is required. Use this to add products, APIs, keys, or adjust security settings.
+No restart is required when hot-reload is enabled. Use it to add products, APIs, keys, or adjust security settings on the fly.
 
 ## Environment variables
 
-| Variable | Description |
-|----------|-------------|
-| `APIM_CONFIG` | Path to the config file (default: `config.yaml`). |
+| Option | Description |
+|--------|-------------|
+| `-f`, `-config` | Config file path (e.g. `apimcore -f ./config/myconfig.yml --tui`). |
+| `-hot-reload` | Watch config file and reload on change (default: off). |
+| `APIM_CONFIG` | Same as `-f` when the flag is not set (default: `config.yaml`). |
 | `APIM_GATEWAY_LISTEN` | Override `gateway.listen`. |
 | `APIM_SERVER_LISTEN` | Override `server.listen`. |
+| `APIM_SECURITY_LOG` | Security log target. Default: `apim-security.jsonl`. See [Security event log](#security-event-log). Set to `off` or `false` to disable. |
+| `-security-log` | Overrides `APIM_SECURITY_LOG`. Use to enable/disable or switch backend without changing env. |
+
+## Security event log
+
+You can persist BLOCKED and RATE_LIMIT events or run without persistence.
+
+- **Off**: Set `-security-log=off` or `APIM_SECURITY_LOG=off` (or `false`). No events are written; same behavior as before the feature existed.
+- **File (JSONL)**: Set path to a file (e.g. `apim-security.jsonl` or `-security-log=/var/log/apim/security.jsonl`). One JSON object per line; fields: `time`, `action`, `ip`, `country`, `method`, `path`, `status`, `tenant_id`. Good for log shippers and simple inspection.
+- **SQLite**: Set `sqlite:<path>` (e.g. `APIM_SECURITY_LOG=sqlite:apim-security.db` or `-security-log=sqlite:./data/security.db`). Events are stored in a table; you can query by time, IP, action, or country. Same async, non-blocking writer as the file backend.
+
+Priority: `-security-log` flag, then `APIM_SECURITY_LOG`, then default `apim-security.jsonl`. If the value is `off` or `false`, persistence is disabled.
 
 ## Example configs
 

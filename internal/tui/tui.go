@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"net"
+	"sort"
 	"strings"
 	"time"
 
@@ -109,12 +111,14 @@ type Model struct {
 	TermWidth    int
 	TermHeight   int
 	Ready        bool
-	OnReload     func()
+	OnReload     func() bool
 	Store        *store.Store
 	Gateway      *gateway.Gateway
 	ConfigPath   string
 	NodeID       string
 	ClusterNodes string
+	NoConfigFile bool
+	HotReload    bool
 
 	Uptime        time.Time
 	TotalRequests int64
@@ -127,6 +131,7 @@ type Model struct {
 	Hub           *hub.Broadcaster
 	RateLimited   int64
 	Blocked       int64
+	GeoThreats    map[string]int
 
 	LastTotalRequests   int64
 	RequestCountHistory []int64
@@ -140,7 +145,11 @@ type Model struct {
 	SelectedPacket *hub.TrafficEvent
 }
 
-func NewModel(onReload func(), s *store.Store, g *gateway.Gateway, h *hub.Broadcaster, configPath, nodeID, clusterNodes string) Model {
+func NewModel(onReload func() bool, s *store.Store, g *gateway.Gateway, h *hub.Broadcaster, configPath, nodeID, clusterNodes string, processStart time.Time, noConfigFile, hotReload bool) Model {
+	uptimeBase := processStart
+	if uptimeBase.IsZero() {
+		uptimeBase = time.Now()
+	}
 	columns := []table.Column{
 		{Title: "Time", Width: 10},
 		{Title: "Geo", Width: 6},
@@ -170,7 +179,7 @@ func NewModel(onReload func(), s *store.Store, g *gateway.Gateway, h *hub.Broadc
 	t.SetStyles(tableStyles)
 
 	return Model{
-		Uptime:              time.Now(),
+		Uptime:              uptimeBase,
 		OnReload:            onReload,
 		Store:               s,
 		Gateway:             g,
@@ -178,6 +187,8 @@ func NewModel(onReload func(), s *store.Store, g *gateway.Gateway, h *hub.Broadc
 		ConfigPath:          configPath,
 		NodeID:              nodeID,
 		ClusterNodes:        clusterNodes,
+		NoConfigFile:        noConfigFile,
+		HotReload:           hotReload,
 		TrafficTable:        t,
 		Mode:                ViewDashboard,
 		Logs:                []string{},
@@ -253,9 +264,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.SelectedPacket = &m.Traffic[idx]
 				}
 			}
-		case "b":
+		case "b", "a":
 			if m.Mode == ViewTraffic && m.SelectedPacket != nil {
 				ip := m.SelectedPacket.IP
+				if host, _, err := net.SplitHostPort(ip); err == nil {
+					ip = host
+				}
 				cfg := m.Gateway.GetSecurity()
 				cfg.IPBlacklist = append(cfg.IPBlacklist, ip)
 				m.Gateway.UpdateSecurity(cfg)
@@ -267,12 +281,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "r":
 			if m.OnReload != nil {
-				m.OnReload()
-				m.Alerts = append(m.Alerts, Alert{
-					Message: "CONFIGURATION RELOADED",
-					Level:   "info",
-					Expires: time.Now().Add(2 * time.Second),
-				})
+				if m.OnReload() {
+					m.NoConfigFile = false
+					m.Alerts = append(m.Alerts, Alert{
+						Message: "CONFIGURATION RELOADED",
+						Level:   "info",
+						Expires: time.Now().Add(2 * time.Second),
+					})
+				} else if m.NoConfigFile {
+					m.Alerts = append(m.Alerts, Alert{
+						Message: "Config file not found - create it and press [R] again",
+						Level:   "warn",
+						Expires: time.Now().Add(4 * time.Second),
+					})
+				}
 			}
 		case "c":
 			if m.Mode == ViewSecurity {
@@ -328,7 +350,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.Logs) > 0 {
 				m.Viewport.SetContent(strings.Join(m.Logs, "\n"))
 			} else {
-				m.Viewport.SetContent("Initializing APIM Core Management Hub...")
+				m.Viewport.SetContent("Initializing ApimCore Management Hub...")
 			}
 			m.Ready = true
 		} else {
@@ -378,11 +400,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.TotalRequests = msg.TotalRequests
 		m.AvgLatency = msg.AvgLatency
 		m.CPUUsage = msg.CPUUsage
-		if msg.MemoryUsageMB > 0 {
+		if msg.MemoryTotalMB > 0 {
+			m.RAMUsage = float64(msg.MemoryUsageMB) / float64(msg.MemoryTotalMB)
+		} else if msg.MemoryUsageMB > 0 {
 			m.RAMUsage = float64(msg.MemoryUsageMB) / 8192.0
 		}
 		m.RateLimited = msg.RateLimited
 		m.Blocked = msg.Blocked
+		m.GeoThreats = msg.GeoThreats
 		return m, nil
 
 	case tickMsg:
@@ -462,13 +487,7 @@ func (m Model) dashboardView() string {
 	}
 
 	cpuUsage := m.CPUUsage
-	if cpuUsage == 0 {
-		cpuUsage = 0.42
-	}
 	ramUsage := m.RAMUsage
-	if ramUsage == 0 {
-		ramUsage = 0.65
-	}
 
 	progressWidth := cardWidth - 6
 	if progressWidth < 8 {
@@ -536,7 +555,7 @@ func (m Model) dashboardView() string {
 		if len(m.Logs) > 0 {
 			logsAreaContent = strings.Join(m.Logs, "\n")
 		} else {
-			logsAreaContent = "Initializing APIM Core Management Hub...\nWaiting for system metrics..."
+			logsAreaContent = "Initializing ApimCore Management Hub...\nWaiting for system metrics..."
 		}
 	}
 
@@ -552,24 +571,75 @@ func (m Model) dashboardView() string {
 	)
 }
 
+const globalMapWidth = 122
+
+func (m Model) renderGlobalRightPanel(width int) string {
+	lines := []string{
+		dashboardTitleStyle.Render("THREAT SUMMARY"),
+		"",
+		fmt.Sprintf("Blocked:      %s", warningStyle.Render(fmt.Sprintf("%d", m.Blocked))),
+		fmt.Sprintf("Rate limited: %s", warningStyle.Render(fmt.Sprintf("%d", m.RateLimited))),
+		"",
+		headerLabelStyle.Render("BY COUNTRY"),
+	}
+	subtlStyle := lipgloss.NewStyle().Foreground(subtle)
+	if len(m.GeoThreats) == 0 {
+		lines = append(lines, subtlStyle.Render("  None"))
+	} else {
+		keys := make([]string, 0, len(m.GeoThreats))
+		for k := range m.GeoThreats {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, c := range keys {
+			lines = append(lines, fmt.Sprintf("  %s %s", c, warningStyle.Render(fmt.Sprintf("%d", m.GeoThreats[c]))))
+		}
+	}
+	lines = append(lines, "", headerLabelStyle.Render("LEGEND"), subtlStyle.Render("  Map: global activity"), subtlStyle.Render("  Points: traffic density"))
+	panelStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(subtle).
+		Padding(0, 1).
+		Width(width).
+		MaxWidth(width)
+	return panelStyle.Render(strings.Join(lines, "\n"))
+}
+
 func (m Model) globalView() string {
 	bodyWidth := m.TermWidth - 4
 	if bodyWidth < 40 {
 		bodyWidth = 40
 	}
+	leftWidth := globalMapWidth
+	if leftWidth > bodyWidth-24 {
+		leftWidth = bodyWidth - 24
+	}
+	rightWidth := bodyWidth - leftWidth - 2
+	if rightWidth < 20 {
+		rightWidth = 0
+	}
+
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(subtle).
 		Padding(0, 1).
-		Width(bodyWidth - 2).
-		MaxWidth(bodyWidth - 2)
+		Width(leftWidth).
+		MaxWidth(leftWidth)
 	mapContent := m.renderGlobalMap()
 	boxContent := boxStyle.Render(dashboardTitleStyle.Render("GLOBAL THREAT MAP") + "\n\n" + mapContent)
-	return lipgloss.JoinVertical(lipgloss.Left,
+
+	top := lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("GLOBAL"),
 		"",
-		boxContent,
 	)
+	var mainContent string
+	if rightWidth > 0 {
+		rightPanel := m.renderGlobalRightPanel(rightWidth)
+		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, boxContent, "  ", rightPanel)
+	} else {
+		mainContent = boxContent
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, top, mainContent)
 }
 
 func (m Model) configView() string {
@@ -587,7 +657,17 @@ func (m Model) configView() string {
 	if path == "" {
 		path = "config.yaml"
 	}
-	content := fmt.Sprintf("Loaded from: %s\n\nView-only. Edit file and press [R] to reload.", path)
+	content := fmt.Sprintf("Path: %s\n\n", path)
+	if m.NoConfigFile {
+		content += warningStyle.Render("File not found. Using defaults (no products).\n\n")
+		content += "Create or edit the file and press " + footerKeyStyle.Render("R") + " to reload.\n"
+	} else {
+		if m.HotReload {
+			content += "Hot-reload: " + specialStyle.Render("on") + ". Edit file and save, or press " + footerKeyStyle.Render("R") + " to reload now."
+		} else {
+			content += "Hot-reload: " + warningStyle.Render("off") + ". Press " + footerKeyStyle.Render("R") + " to reload config."
+		}
+	}
 	boxContent := boxStyle.Render(dashboardTitleStyle.Render("LIVE CONFIGURATION (YAML)") + "\n\n" + content)
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("CONFIG"),
@@ -629,36 +709,99 @@ func (m Model) portalView() string {
 	)
 }
 
+const trafficRightPanelWidth = 32
+
+func (m Model) renderTrafficRightPanel(width int) string {
+	subtlStyle := lipgloss.NewStyle().Foreground(subtle)
+	lines := []string{dashboardTitleStyle.Render("TRAFFIC")}
+	lines = append(lines, "")
+
+	if m.SelectedPacket != nil {
+		p := m.SelectedPacket
+		lines = append(lines, headerLabelStyle.Render("SELECTED REQUEST"), "")
+		lines = append(lines, fmt.Sprintf("Method:  %s", p.Method))
+		lines = append(lines, fmt.Sprintf("Path:    %s", p.Path))
+		lines = append(lines, fmt.Sprintf("Status:  %d", p.Status))
+		lines = append(lines, fmt.Sprintf("Latency: %dms", p.Latency))
+		lines = append(lines, fmt.Sprintf("Geo:     %s", p.Country))
+		lines = append(lines, fmt.Sprintf("IP:      %s", p.IP))
+		lines = append(lines, "")
+		lines = append(lines, headerLabelStyle.Render("ACTIONS"))
+		lines = append(lines, footerKeyStyle.Render("B")+" or "+footerKeyStyle.Render("A")+"  "+footerActionStyle.Render("Add IP to blacklist"))
+		lines = append(lines, footerKeyStyle.Render("Esc")+"     "+footerActionStyle.Render("Back to list"))
+	} else {
+		lines = append(lines, headerLabelStyle.Render("SUMMARY"), "")
+		lines = append(lines, fmt.Sprintf("Requests: %s", infoStyle.Render(fmt.Sprintf("%d", len(m.Traffic)))))
+		lines = append(lines, fmt.Sprintf("Blocked:  %s", warningStyle.Render(fmt.Sprintf("%d", m.Blocked))))
+		lines = append(lines, fmt.Sprintf("Rate lim: %s", warningStyle.Render(fmt.Sprintf("%d", m.RateLimited))))
+		lines = append(lines, "")
+		lines = append(lines, headerLabelStyle.Render("KEYBOARD"))
+		lines = append(lines, subtlStyle.Render("  Up/Down  Navigate"))
+		lines = append(lines, subtlStyle.Render("  Enter    Details"))
+		lines = append(lines, subtlStyle.Render("  B or A   Blacklist IP"))
+		lines = append(lines, subtlStyle.Render("  Esc      Back / Dashboard"))
+	}
+
+	panelStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(subtle).
+		Padding(0, 1).
+		Width(width).
+		MaxWidth(width)
+	return panelStyle.Render(strings.Join(lines, "\n"))
+}
+
 func (m Model) trafficView() string {
 	bodyWidth := m.TermWidth - 4
 	if bodyWidth < 1 {
 		bodyWidth = 1
 	}
-	tableContent := m.TrafficTable.View()
-	if m.SelectedPacket != nil {
-		detailsStyle := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(subtle).
-			Padding(0, 1).
-			Width(bodyWidth - 2).
-			MaxWidth(bodyWidth - 2)
-		details := detailsStyle.Render(fmt.Sprintf("%s\n\nMethod: %s\nPath: %s\nBackend: %s\nStatus: %d\nLatency: %dms\nTenant: %s\nGeo: %s\nTime: %s",
-			dashboardTitleStyle.Render("PACKET DETAILS"),
-			m.SelectedPacket.Method,
-			m.SelectedPacket.Path,
-			m.SelectedPacket.Backend,
-			m.SelectedPacket.Status,
-			m.SelectedPacket.Latency,
-			m.SelectedPacket.TenantID,
-			m.SelectedPacket.Country,
-			m.SelectedPacket.Timestamp.Format(time.RFC3339),
-		))
-		tableContent = lipgloss.JoinVertical(lipgloss.Left, tableContent, "", details)
+	rightWidth := trafficRightPanelWidth
+	if rightWidth > bodyWidth-30 {
+		rightWidth = 0
 	}
+	leftWidth := bodyWidth - rightWidth - 2
+	if leftWidth < 30 {
+		leftWidth = bodyWidth
+		rightWidth = 0
+	}
+
+	m.TrafficTable.SetWidth(leftWidth)
+	tableContent := m.TrafficTable.View()
+
+	var mainContent string
+	if rightWidth > 0 {
+		rightPanel := m.renderTrafficRightPanel(rightWidth)
+		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, tableContent, "  ", rightPanel)
+	} else {
+		if m.SelectedPacket != nil {
+			detailsStyle := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(subtle).
+				Padding(0, 1).
+				Width(leftWidth - 2).
+				MaxWidth(leftWidth - 2)
+			details := detailsStyle.Render(fmt.Sprintf("%s\n\nMethod: %s\nPath: %s\nBackend: %s\nStatus: %d\nLatency: %dms\nTenant: %s\nGeo: %s\nTime: %s",
+				dashboardTitleStyle.Render("PACKET DETAILS"),
+				m.SelectedPacket.Method,
+				m.SelectedPacket.Path,
+				m.SelectedPacket.Backend,
+				m.SelectedPacket.Status,
+				m.SelectedPacket.Latency,
+				m.SelectedPacket.TenantID,
+				m.SelectedPacket.Country,
+				m.SelectedPacket.Timestamp.Format(time.RFC3339),
+			))
+			mainContent = lipgloss.JoinVertical(lipgloss.Left, tableContent, "", details)
+		} else {
+			mainContent = tableContent
+		}
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("TRAFFIC"),
 		"",
-		tableContent,
+		mainContent,
 	)
 }
 
@@ -845,6 +988,18 @@ func (m Model) View() string {
 	}
 	if alerts != "" {
 		body = alerts + "\n" + body
+	}
+	if m.NoConfigFile {
+		path := m.ConfigPath
+		if path == "" {
+			path = "config.yaml"
+		}
+		noConfigBanner := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("0")).
+			Background(lipgloss.Color("208")).
+			Padding(0, 1).
+			Render("WARNING: No config file loaded (using defaults). Create " + path + " and press [R] to reload.")
+		body = noConfigBanner + "\n" + body
 	}
 
 	footer := m.renderFooter()

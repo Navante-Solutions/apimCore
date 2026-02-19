@@ -2,18 +2,24 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
 
+const brailleBlank = '\u2800'
+
 var (
 	brailleMapStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#252525")). // Dark base
+			Foreground(lipgloss.Color("#252525")).
 			Bold(true)
+	brailleMapPointsStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6B7280")).
+				Bold(true)
 
 	threatStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#00F2FF")). // Neon Cyber Blue
+			Foreground(lipgloss.Color("#00F2FF")).
 			Bold(true)
 )
 
@@ -42,14 +48,34 @@ func (m Model) renderGlobalMap() string {
 	}
 
 	res := ""
-	for _, r := range rows {
-		res += brailleMapStyle.Render(r) + "\n"
+	for _, row := range rows {
+		var line strings.Builder
+		for _, r := range row {
+			if r == brailleBlank {
+				line.WriteString(brailleMapStyle.Render(string(r)))
+			} else {
+				line.WriteString(brailleMapPointsStyle.Render(string(r)))
+			}
+		}
+		res += line.String() + "\n"
 	}
 
 	threat := threatStyle.Render("★")
 	res += "\n" + fmt.Sprintf("%s [LIVE THREATS]: ", threat)
-	res += specialStyle.Render("SA-EAST-1 (BR)") + " | " + warningStyle.Render("US-EAST-1 (DDoS)")
-
+	if len(m.GeoThreats) == 0 {
+		res += specialStyle.Render("None")
+	} else {
+		keys := make([]string, 0, len(m.GeoThreats))
+		for k := range m.GeoThreats {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, country := range keys {
+			parts = append(parts, warningStyle.Render(fmt.Sprintf("%s: %d", country, m.GeoThreats[country])))
+		}
+		res += strings.Join(parts, " | ")
+	}
 	return res
 }
 
@@ -78,7 +104,7 @@ func (m Model) renderHeader(uptime string) string {
 	}
 
 	leftContent := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render("APIM CORE - MANAGEMENT HUB"),
+		titleStyle.Render("ApimCore - MANAGEMENT HUB"),
 		headerLabelStyle.Render("Uptime:  ")+infoStyle.Render(uptime),
 		headerLabelStyle.Render("Requests: ")+infoStyle.Render(fmt.Sprintf("%d", m.TotalRequests)),
 	)

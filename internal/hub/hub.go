@@ -12,15 +12,16 @@ const (
 )
 
 type SystemStats struct {
-	TotalRequests int64
-	AvgLatency    float64
-	RateLimited   int64
-	Blocked       int64
-	ActiveConns   int
-	Uptime        time.Duration
-	CPUUsage      float64
-	MemoryUsageMB uint64
-	GeoThreats    map[string]int
+	TotalRequests   int64
+	AvgLatency      float64
+	RateLimited     int64
+	Blocked         int64
+	ActiveConns     int
+	Uptime          time.Duration
+	CPUUsage        float64
+	MemoryUsageMB   uint64
+	MemoryTotalMB   uint64
+	GeoThreats      map[string]int
 }
 
 type TrafficEvent struct {

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"log"
@@ -19,6 +20,20 @@ import (
 	"github.com/navantesolutions/apimcore/internal/store"
 	"golang.org/x/time/rate"
 )
+
+type timeoutTransport struct {
+	base    http.RoundTripper
+	timeout time.Duration
+}
+
+func (t *timeoutTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.timeout > 0 {
+		ctx, cancel := context.WithTimeout(req.Context(), t.timeout)
+		defer cancel()
+		req = req.WithContext(ctx)
+	}
+	return t.base.RoundTrip(req)
+}
 
 const (
 	HeaderAPIKey    = "X-Api-Key"
@@ -60,6 +75,10 @@ func New(cfg *config.Config, s *store.Store, m *meter.Meter, h *hub.Broadcaster)
 		meter:  m,
 		proxy:  &httputil.ReverseProxy{},
 		Hub:    h,
+	}
+	g.proxy.Transport = &timeoutTransport{
+		base:    http.DefaultTransport,
+		timeout: time.Duration(cfg.Gateway.BackendTimeoutSeconds) * time.Second,
 	}
 	g.UpdateSecurity(cfg.Security)
 	g.rebuildHandler()
@@ -119,6 +138,16 @@ func (g *Gateway) UpdateConfig(cfg *config.Config) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.config = cfg
+	if g.proxy.Transport != nil {
+		if tt, ok := g.proxy.Transport.(*timeoutTransport); ok {
+			tt.timeout = time.Duration(cfg.Gateway.BackendTimeoutSeconds) * time.Second
+		} else {
+			g.proxy.Transport = &timeoutTransport{
+				base:    http.DefaultTransport,
+				timeout: time.Duration(cfg.Gateway.BackendTimeoutSeconds) * time.Second,
+			}
+		}
+	}
 	g.UpdateSecurity(cfg.Security)
 	g.rebuildHandler()
 }
@@ -333,7 +362,7 @@ func (g *Gateway) proxyHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	log.Printf("apim gateway: %s %s -> %s %d %dms", r.Method, path, backendName, rec.status, elapsed)
+	log.Printf("apimcore gateway: %s %s -> %s %d %dms", r.Method, path, backendName, rec.status, elapsed)
 }
 
 func matchHost(actual, target string) bool {

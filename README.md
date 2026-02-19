@@ -1,6 +1,6 @@
-# APIM Core
+# ApimCore
 
-APIM Core is a lightweight, high-performance API gateway written in Go. It provides a single entry point for your APIs with key-based access control, rate limiting, and an optional terminal UI (TUI) for monitoring and administration. Configuration is YAML-driven with hot-reload; no database is required.
+ApimCore is a lightweight, high-performance API gateway written in Go. It provides a single entry point for your APIs with key-based access control, rate limiting, and an optional terminal UI (TUI) for monitoring and administration. Configuration is YAML-driven; optional hot-reload with `-hot-reload`. No database required.
 
 ---
 
@@ -13,7 +13,7 @@ APIM Core is a lightweight, high-performance API gateway written in Go. It provi
 - **Management TUI**: Real-time dashboard, traffic view, admin and security panels
 - **Developer portal**: Optional embedded portal for API documentation
 - **Observability**: Prometheus metrics and health endpoints
-- **Hot-reload**: Edit `config.yaml` and see changes applied without restart
+- **Hot-reload** (opt-in): With `-hot-reload`, config file changes are applied automatically; otherwise use [R] in TUI or restart
 
 ---
 
@@ -31,7 +31,7 @@ APIM Core is a lightweight, high-performance API gateway written in Go. It provi
 Download the latest release for your platform from [Releases](https://github.com/Navante-Solutions/apimCore/releases), then:
 
 ```bash
-./apim --config config.yaml --tui
+./apimcore -f config.yaml --tui
 ```
 
 - Gateway: `http://localhost:8080`
@@ -42,14 +42,14 @@ Download the latest release for your platform from [Releases](https://github.com
 ```bash
 git clone https://github.com/Navante-Solutions/apimCore.git
 cd apimCore
-go build -o apim ./cmd/apim
-./apim --config config.yaml --tui
+go build -o apimcore ./cmd/apim
+./apimcore -f config.yaml --tui
 ```
 
 ### Using Docker
 
 ```bash
-docker run -p 8080:8080 -p 8081:8081 -v $(pwd)/config.yaml:/etc/apim/config.yaml ghcr.io/navante-solutions/apimcore:latest
+docker run -p 8080:8080 -p 8081:8081 -v $(pwd)/config.yaml:/etc/apimcore/config.yaml ghcr.io/navante-solutions/apimcore:latest
 ```
 
 Set `APIM_CONFIG` if your config path differs. See [Getting started](docs/getting-started.md) for details.
@@ -58,7 +58,7 @@ Set `APIM_CONFIG` if your config path differs. See [Getting started](docs/gettin
 
 ## Configuration
 
-APIM Core is configured via a single YAML file (default: `config.yaml`). Main sections:
+ApimCore is configured via a single YAML file (default: `config.yaml`). Main sections:
 
 | Section        | Purpose                                  |
 |----------------|------------------------------------------|
@@ -75,7 +75,7 @@ Full reference: [Configuration guide](docs/configuration.md). Example configs: [
 
 ## Management TUI
 
-With `--tui`, APIM Core starts an in-process terminal UI. Use **F3** for the main menu.
+With `--tui`, ApimCore starts an in-process terminal UI. Use **F3** for the main menu.
 
 | View           | Shortcut | Description                          |
 |----------------|----------|--------------------------------------|
@@ -109,6 +109,7 @@ curl http://localhost:8081/health
 | [Getting started](docs/getting-started.md) | Install, run, and first checks |
 | [Configuration](docs/configuration.md)   | Config file reference and behavior |
 | [Architecture](docs/architecture.md)     | Components and data flow |
+| [Deployment](docs/deployment.md)       | AWS, Azure, Kubernetes; ingress, egress, internal vs external |
 | [Production readiness](docs/tui-production-readiness.md) | TUI and gateway production checklist |
 
 Example configurations: [docs/examples](docs/examples/) (basic, security, multi-tenant, geo-fencing).

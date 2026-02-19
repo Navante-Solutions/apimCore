@@ -1,6 +1,6 @@
 # Production readiness
 
-This document lists current mocks and placeholders in the TUI and gateway pipeline, and what is required to run APIM Core with real data in production. It is intended for operators and contributors who need to harden deployments or implement the missing pieces.
+This document lists current mocks and placeholders in the TUI and gateway pipeline, and what is required to run ApimCore with real data in production. It is intended for operators and contributors who need to harden deployments or implement the missing pieces.
 
 ---
 
@@ -19,15 +19,7 @@ This document lists current mocks and placeholders in the TUI and gateway pipeli
 
 ## 2. CPU and memory (system vitals)
 
-**Current state:** Dashboard uses fallback values (e.g. 0.42 / 0.65) when `CPUUsage` / `RAMUsage` are zero. The hub Collector currently sends mock data.
-
-**To implement:**
-
-- Use a system library (e.g. `github.com/shirou/gopsutil/v3`) in the hub Collector to read real CPU percent and memory (e.g. `mem.VirtualMemory()`).
-- Start the Collector in `main.go` when the TUI is active and inject the hub; call `PublishStats` with real values on each tick.
-- In the TUI, keep the fallback only until the first real `SystemStats` is received.
-
-**Relevant:** `internal/hub/hub.go`, `cmd/apim/main.go`, `internal/tui/tui.go`.
+**Status: Implemented.** The TUI ticker in `main.go` uses `github.com/shirou/gopsutil/v3` to read real CPU (`cpu.Percent`) and memory (`mem.VirtualMemory()`). Values are sent every 2s in `hub.SystemStats`; the dashboard shows real OS/container usage. Uptime is process start time. RAM % uses total memory when available (`MemoryTotalMB`).
 
 ---
 
@@ -126,17 +118,9 @@ This document lists current mocks and placeholders in the TUI and gateway pipeli
 
 ## 10. Uptime and system stats (hub Collector)
 
-**Current state:** Collector sends mock uptime, CPU, memory, active connections, and geo threats.
+**Status: Partially implemented.** Uptime and CPU/memory are real (see section 2); they are sent from the TUI ticker in `main.go`. The standalone hub Collector is still mock and not started.
 
-**To implement:**
-
-- **Uptime:** Record process start time (e.g. in main or hub) and send `time.Since(processStartTime)` in the Collector.
-- **CPU/Memory:** See section 2 (gopsutil or equivalent).
-- **ActiveConns:** Optional: use server `ConnState` or gateway connection counters; or omit until implemented.
-- **RateLimited / Blocked:** See section 3.
-- **GeoThreats:** Aggregate from real traffic (e.g. blocked/error by country) or remove from SystemStats until an aggregator exists.
-
-**Relevant:** `internal/hub/hub.go`, `cmd/apim/main.go`.
+**Optional:** ActiveConns (e.g. via server ConnState), GeoThreats aggregation from traffic.
 
 ---
 

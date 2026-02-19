@@ -1,6 +1,6 @@
 .PHONY: build test lint docker run clean
 
-BINARY := apim
+BINARY := apimcore
 MAIN   := ./cmd/apim
 
 build:

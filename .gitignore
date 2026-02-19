@@ -1,5 +1,7 @@
 /apim
 /apim.exe
+/apimcore
+/apimcore.exe
 *.test
 *.out
 vendor/

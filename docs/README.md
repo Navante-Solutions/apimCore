@@ -1,6 +1,6 @@
-# APIM Core documentation
+# ApimCore documentation
 
-This folder contains the official documentation for APIM Core.
+This folder contains the official documentation for ApimCore.
 
 ## Guides
 
@@ -9,6 +9,7 @@ This folder contains the official documentation for APIM Core.
 | [Getting started](getting-started.md) | Installation (binary, source, Docker), first run, and health check |
 | [Configuration](configuration.md) | Config file structure, gateway, server, products, subscriptions, security, and hot-reload |
 | [Architecture](architecture.md) | Components, store, gateway, meter, and management server |
+| [Deployment](deployment.md) | AWS, Azure, Kubernetes; ingress, egress, health probes, internal vs external |
 
 ## Reference
 

@@ -16,7 +16,8 @@ type Config struct {
 }
 
 type GatewayConfig struct {
-	Listen string `yaml:"listen"`
+	Listen               string `yaml:"listen"`
+	BackendTimeoutSeconds int    `yaml:"backend_timeout_seconds"`
 }
 
 type ServerConfig struct {
@@ -69,6 +70,12 @@ type RateLimitConfig struct {
 	Burst   int     `yaml:"burst"`
 }
 
+func Default() *Config {
+	c := &Config{}
+	setDefaults(c)
+	return c
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -85,6 +92,9 @@ func Load(path string) (*Config, error) {
 func setDefaults(c *Config) {
 	if c.Gateway.Listen == "" {
 		c.Gateway.Listen = ":8080"
+	}
+	if c.Gateway.BackendTimeoutSeconds <= 0 {
+		c.Gateway.BackendTimeoutSeconds = 30
 	}
 	if c.Server.Listen == "" {
 		c.Server.Listen = ":8081"

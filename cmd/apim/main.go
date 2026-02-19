@@ -11,6 +11,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -21,9 +23,46 @@ import (
 	"github.com/navantesolutions/apimcore/internal/gateway"
 	"github.com/navantesolutions/apimcore/internal/hub"
 	"github.com/navantesolutions/apimcore/internal/meter"
+	"github.com/navantesolutions/apimcore/internal/securitylog"
 	"github.com/navantesolutions/apimcore/internal/store"
 	"github.com/navantesolutions/apimcore/internal/tui"
 )
+
+func printHelp() {
+	fmt.Fprintf(os.Stderr, `ApimCore - API gateway with config-driven products, subscriptions, and security.
+
+USAGE
+  apimcore [OPTIONS]
+
+OPTIONS
+  -f, -config PATH     Config file path. Default: config.yaml, or APIM_CONFIG env.
+  -tui                 Start the interactive TUI (traffic, geo, config, system).
+  -hot-reload          Watch config file and reload on change. Without this, use [R] in TUI or restart to apply changes.
+  -security-log VALUE Persistence for BLOCKED/RATE_LIMIT events:
+                       off              Disable (no log).
+                       PATH             JSONL file (e.g. apim-security.jsonl).
+                       sqlite:PATH      SQLite database (e.g. sqlite:apim-security.db).
+                       Default from APIM_SECURITY_LOG, or apim-security.jsonl.
+  -h, -help            Show this help and exit.
+
+ENVIRONMENT
+  APIM_CONFIG          Config file path when -f is not set.
+  APIM_SECURITY_LOG     Security log target (off, path, or sqlite:path) when -security-log is not set.
+  APIM_GATEWAY_LISTEN   Override gateway.listen from config.
+  APIM_SERVER_LISTEN    Override server.listen from config.
+
+EXAMPLES
+  apimcore
+  apimcore -f ./config/prod.yaml
+  apimcore --tui
+  apimcore -f config.yaml -tui -hot-reload
+  apimcore -security-log=off --tui
+  apimcore -security-log=sqlite:./data/security.db
+
+DOCUMENTATION
+  See docs/ for configuration, deployment, and architecture.
+`)
+}
 
 type tuiWriter struct {
 	p *tea.Program
@@ -39,17 +78,43 @@ func (tw *tuiWriter) Write(p []byte) (n int, err error) {
 //go:embed all:web/devportal
 var devportalFS embed.FS
 
+var processStartTime = time.Now()
+
 func main() {
+	flag.Usage = printHelp
+	for _, arg := range os.Args[1:] {
+		if arg == "-h" || arg == "--help" {
+			printHelp()
+			os.Exit(0)
+		}
+	}
+	var configPath string
+	flag.StringVar(&configPath, "f", "", "Path to config file (default: config.yaml or APIM_CONFIG)")
+	flag.StringVar(&configPath, "config", "", "Path to config file (same as -f)")
+	hotReload := flag.Bool("hot-reload", false, "Watch config file and reload on change (use [R] in TUI for manual reload)")
 	useTUI := flag.Bool("tui", false, "Enable interactive TUI monitor")
+	securityLogFlag := flag.String("security-log", "", "Security event log: off, <path> (JSONL file), or sqlite:<path> (default from APIM_SECURITY_LOG or apim-security.jsonl)")
 	flag.Parse()
 
-	configPath := os.Getenv("APIM_CONFIG")
+	if configPath == "" {
+		configPath = os.Getenv("APIM_CONFIG")
+	}
 	if configPath == "" {
 		configPath = "config.yaml"
 	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		log.Fatalf("load config: %v", err)
+
+	var cfg *config.Config
+	noConfigFile := false
+	if _, err := os.Stat(configPath); err != nil && os.IsNotExist(err) {
+		log.Printf("config file not found: %s (using defaults; gateway will run with no products)", configPath)
+		cfg = config.Default()
+		noConfigFile = true
+	} else {
+		var err error
+		cfg, err = config.Load(configPath)
+		if err != nil {
+			log.Fatalf("load config: %v", err)
+		}
 	}
 
 	st := store.NewStore()
@@ -60,28 +125,65 @@ func main() {
 	hb := hub.NewBroadcaster()
 	gw := gateway.New(cfg, st, m, hb)
 
-	// Watch for config changes
+	securityLogPath := *securityLogFlag
+	if securityLogPath == "" {
+		securityLogPath = os.Getenv("APIM_SECURITY_LOG")
+	}
+	if securityLogPath == "" {
+		securityLogPath = "apim-security.jsonl"
+	}
+	if securityLogPath == "off" || securityLogPath == "false" {
+		securityLogPath = ""
+	}
+	secLog, err := securitylog.New(securityLogPath)
+	if err != nil {
+		log.Printf("security log: %v (events will not be persisted)", err)
+	} else if secLog != nil {
+		defer secLog.Close()
+		log.Printf("security events logged to %s", securityLogPath)
+	}
+
+	var tuiTrafficChan chan hub.TrafficEvent
+	if *useTUI {
+		tuiTrafficChan = make(chan hub.TrafficEvent, 100)
+	}
 	go func() {
-		lastMod := time.Now()
-		for {
-			time.Sleep(5 * time.Second)
-			info, err := os.Stat(configPath)
-			if err != nil {
-				continue
+		for ev := range hb.TrafficChan() {
+			if secLog != nil && (ev.Action == "BLOCKED" || ev.Action == "RATE_LIMIT") {
+				secLog.Append(ev)
 			}
-			if info.ModTime().After(lastMod) {
-				log.Printf("config file changed, reloading...")
-				newCfg, err := config.Load(configPath)
-				if err != nil {
-					log.Printf("failed to reload config: %v", err)
-					continue
+			if tuiTrafficChan != nil {
+				select {
+				case tuiTrafficChan <- ev:
+				default:
 				}
-				st.PopulateFromConfig(newCfg)
-				gw.UpdateConfig(newCfg)
-				lastMod = info.ModTime()
 			}
 		}
 	}()
+
+	if *hotReload {
+		go func() {
+			lastMod := time.Now()
+			for {
+				time.Sleep(5 * time.Second)
+				info, err := os.Stat(configPath)
+				if err != nil {
+					continue
+				}
+				if info.ModTime().After(lastMod) {
+					log.Printf("config file changed, reloading...")
+					newCfg, err := config.Load(configPath)
+					if err != nil {
+						log.Printf("failed to reload config: %v", err)
+						continue
+					}
+					st.PopulateFromConfig(newCfg)
+					gw.UpdateConfig(newCfg)
+					lastMod = info.ModTime()
+				}
+			}
+		}()
+	}
 	gatewayMux := http.NewServeMux()
 	gatewayMux.Handle("/", gw)
 
@@ -103,7 +205,7 @@ func main() {
 	serverMux.Handle("/devportal/", http.StripPrefix("/devportal", http.FileServer(http.FS(dpFS))))
 
 	go func() {
-		log.Printf("apim gateway listening on %s", cfg.Gateway.Listen)
+		log.Printf("apimcore gateway listening on %s", cfg.Gateway.Listen)
 		if err := http.ListenAndServe(cfg.Gateway.Listen, gatewayMux); err != nil {
 			log.Fatalf("gateway: %v", err)
 		}
@@ -123,13 +225,15 @@ func main() {
 		}
 
 		var p *tea.Program
-		tuiModel := tui.NewModel(func() {
+		tuiModel := tui.NewModel(func() bool {
 			newCfg, err := config.Load(configPath)
-			if err == nil {
-				gw.UpdateConfig(newCfg)
-				st.PopulateFromConfig(newCfg)
+			if err != nil {
+				return false
 			}
-		}, st, gw, hb, configPath, nodeID, clusterNodes)
+			gw.UpdateConfig(newCfg)
+			st.PopulateFromConfig(newCfg)
+			return true
+		}, st, gw, hb, configPath, nodeID, clusterNodes, processStartTime, noConfigFile, *hotReload)
 
 		p = tea.NewProgram(tuiModel, tea.WithAltScreen())
 		log.SetOutput(&tuiWriter{p: p})
@@ -141,6 +245,18 @@ func main() {
 				statsTotal, _, _ := m.StatsSince(since)
 				avgLat := m.AvgLatencySince(since)
 				blocked, rateLimited := gw.Stats()
+
+				cpuPct := 0.0
+				if percents, err := cpu.Percent(100*time.Millisecond, false); err == nil && len(percents) > 0 {
+					cpuPct = percents[0] / 100.0
+				}
+				memUsedMB := uint64(0)
+				memTotalMB := uint64(0)
+				if v, err := mem.VirtualMemory(); err == nil {
+					memUsedMB = v.Used / (1024 * 1024)
+					memTotalMB = v.Total / (1024 * 1024)
+				}
+
 				p.Send(tui.MetricsUpdateMsg{
 					TotalRequests: statsTotal,
 					AvgLatency:    avgLat,
@@ -150,19 +266,22 @@ func main() {
 					AvgLatency:    avgLat,
 					RateLimited:   rateLimited,
 					Blocked:       blocked,
+					Uptime:        time.Since(processStartTime),
+					CPUUsage:      cpuPct,
+					MemoryUsageMB: memUsedMB,
+					MemoryTotalMB: memTotalMB,
 				})
 			}
 		}()
 
-		// Traffic stream via Hub
 		go func() {
-			for pkt := range hb.TrafficChan() {
+			for pkt := range tuiTrafficChan {
 				p.Send(pkt)
 			}
 		}()
 
 		go func() {
-			log.Printf("apim server listening on %s (admin, devportal, metrics)", cfg.Server.Listen)
+			log.Printf("apimcore server listening on %s (admin, devportal, metrics)", cfg.Server.Listen)
 			if err := http.ListenAndServe(cfg.Server.Listen, serverMux); err != nil {
 				log.Fatalf("server: %v", err)
 			}
@@ -173,7 +292,7 @@ func main() {
 			os.Exit(1)
 		}
 	} else {
-		log.Printf("apim server listening on %s (admin, devportal, metrics)", cfg.Server.Listen)
+		log.Printf("apimcore server listening on %s (admin, devportal, metrics)", cfg.Server.Listen)
 		if err := http.ListenAndServe(cfg.Server.Listen, serverMux); err != nil {
 			log.Fatalf("server: %v", err)
 		}

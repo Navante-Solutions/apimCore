@@ -1,6 +1,6 @@
-# Getting started with APIM Core
+# Getting started with ApimCore
 
-This guide walks you through installing and running APIM Core. For configuration details, see [Configuration](configuration.md). For an overview of the system, see [Architecture](architecture.md).
+This guide walks you through installing and running ApimCore. For configuration details, see [Configuration](configuration.md). For an overview of the system, see [Architecture](architecture.md).
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ This guide walks you through installing and running APIM Core. For configuration
 3. Extract and run:
    ```bash
    tar -xzf apimCore_linux_amd64.tar.gz
-   ./apim --config config.yaml --tui
+   ./apimcore -f config.yaml --tui
    ```
 
 ### Option 2: Build from source
@@ -30,12 +30,12 @@ This guide walks you through installing and running APIM Core. For configuration
 2. Download dependencies and build:
    ```bash
    go mod tidy
-   go build -o apim ./cmd/apim
+   go build -o apimcore ./cmd/apim
    ```
 
 3. Run with your config and optional TUI:
    ```bash
-   ./apim --config config.yaml --tui
+   ./apimcore -f config.yaml --tui
    ```
 
 ### Option 3: Docker
@@ -47,10 +47,10 @@ This guide walks you through installing and running APIM Core. For configuration
 
 2. Run with config mounted:
    ```bash
-   docker run -p 8080:8080 -p 8081:8081 -v "$(pwd)/config.yaml:/etc/apim/config.yaml" apimcore:latest
+   docker run -p 8080:8080 -p 8081:8081 -v "$(pwd)/config.yaml:/etc/apimcore/config.yaml" apimcore:latest
    ```
 
-   The default config path inside the container is `/etc/apim/config.yaml`. Override with:
+   The default config path inside the container is `/etc/apimcore/config.yaml`. Override with:
    ```bash
    docker run -e APIM_CONFIG=/path/in/container/config.yaml ...
    ```
@@ -59,15 +59,15 @@ This guide walks you through installing and running APIM Core. For configuration
 
 - **Without TUI** (gateway and management server only):
   ```bash
-  ./apim --config config.yaml
+  ./apimcore -f config.yaml
   ```
 
 - **With TUI** (adds the in-process management interface):
   ```bash
-  ./apim --config config.yaml --tui
+  ./apimcore -f config.yaml --tui
   ```
 
-If `--config` is omitted, APIM Core looks for `config.yaml` in the current directory. You can also set the config path with the `APIM_CONFIG` environment variable.
+If `-f` / `-config` is omitted, ApimCore uses `APIM_CONFIG` if set, otherwise `config.yaml` in the current directory.
 
 ## Quick check
 
