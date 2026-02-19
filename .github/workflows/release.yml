@@ -42,6 +42,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Attest Build Provenance
+        # Attestations are only available for public repos or paid plans.
+        # Skip this step when the feature is not available so releases still succeed.
+        if: ${{ github.event.repository.visibility == 'public' }}
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: "dist/**"
