@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
 	"sync"
 	"time"
 
@@ -21,16 +22,18 @@ type ApiProduct struct {
 }
 
 type ApiDefinition struct {
-	ID             int64
-	ProductID      int64
-	Name           string
-	Host           string
-	PathPrefix     string
-	BackendURL     string
-	OpenAPISpecURL string
-	Version        string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID               int64
+	ProductID        int64
+	Name             string
+	Host             string
+	PathPrefix       string
+	BackendURL       string
+	OpenAPISpecURL   string
+	Version          string
+	AddHeaders       map[string]string
+	StripPathPrefix  bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type Subscription struct {
@@ -65,6 +68,7 @@ type RequestUsage struct {
 	Path            string
 	StatusCode      int
 	ResponseTimeMs  int64
+	BackendTimeMs   int64
 	RequestedAt     time.Time
 }
 
@@ -130,13 +134,15 @@ func (s *Store) PopulateFromConfig(cfg *config.Config) {
 
 		for _, ac := range pc.Apis {
 			d := &ApiDefinition{
-				ProductID:      id,
-				Name:           ac.Name,
-				Host:           ac.Host,
-				PathPrefix:     ac.PathPrefix,
-				BackendURL:     ac.BackendURL,
-				OpenAPISpecURL: ac.OpenAPISpecURL,
-				Version:        ac.Version,
+				ProductID:       id,
+				Name:            ac.Name,
+				Host:            ac.Host,
+				PathPrefix:      ac.PathPrefix,
+				BackendURL:      ac.BackendURL,
+				OpenAPISpecURL:  ac.OpenAPISpecURL,
+				Version:         ac.Version,
+				AddHeaders:      copyStringMap(ac.AddHeaders),
+				StripPathPrefix: ac.StripPathPrefix,
 			}
 			s.CreateDefinition(d)
 		}
@@ -150,6 +156,7 @@ func (s *Store) PopulateFromConfig(cfg *config.Config) {
 		sub := &Subscription{
 			ProductID:   productID,
 			DeveloperID: sc.DeveloperID,
+			TenantID:    sc.TenantID,
 			Plan:        sc.Plan,
 			Active:      true,
 		}
@@ -410,6 +417,115 @@ func (s *Store) UsageByApi(apiID int64, since time.Time) []RequestUsage {
 	return out
 }
 
+func (s *Store) UsageByTenant(tenantID string, since time.Time) []RequestUsage {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []RequestUsage
+	for _, u := range s.usage {
+		if u.TenantID == tenantID && !u.RequestedAt.Before(since) {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+func (s *Store) PercentileResponseTimeMsSince(since time.Time, percentile float64) (ms float64, count int) {
+	s.mu.RLock()
+	var slice []int64
+	for _, u := range s.usage {
+		if !u.RequestedAt.Before(since) {
+			slice = append(slice, u.ResponseTimeMs)
+		}
+	}
+	s.mu.RUnlock()
+	if len(slice) == 0 {
+		return 0, 0
+	}
+	sort.Slice(slice, func(i, j int) bool { return slice[i] < slice[j] })
+	idx := int(float64(len(slice)) * percentile)
+	if idx >= len(slice) {
+		idx = len(slice) - 1
+	}
+	return float64(slice[idx]), len(slice)
+}
+
+func (s *Store) RPSByRouteSince(since time.Time) map[string]float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := make(map[string]int)
+	for _, u := range s.usage {
+		if !u.RequestedAt.Before(since) {
+			counts[u.Path]++
+		}
+	}
+	secs := time.Since(since).Seconds()
+	if secs < 1 {
+		secs = 1
+	}
+	out := make(map[string]float64, len(counts))
+	for route, n := range counts {
+		out[route] = float64(n) / secs
+	}
+	return out
+}
+
+func (s *Store) UsageByVersionSince(since time.Time) map[string]int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[string]int64)
+	for _, u := range s.usage {
+		if !u.RequestedAt.Before(since) {
+			def := s.definitions[u.ApiDefinitionID]
+			ver := "unknown"
+			if def != nil && def.Version != "" {
+				ver = def.Version
+			}
+			out[ver]++
+		}
+	}
+	return out
+}
+
+func (s *Store) ErrorRateSince(since time.Time) (rate float64, total int, errors int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var errCount int
+	var n int
+	for _, u := range s.usage {
+		if !u.RequestedAt.Before(since) {
+			n++
+			if u.StatusCode >= 400 {
+				errCount++
+			}
+		}
+	}
+	if n == 0 {
+		return 0, 0, 0
+	}
+	return float64(errCount) / float64(n), n, errCount
+}
+
+func (s *Store) AvgBackendVsGatewaySince(since time.Time) (avgBackendMs, avgGatewayMs float64, count int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var sumBackend, sumGateway int64
+	for _, u := range s.usage {
+		if !u.RequestedAt.Before(since) && u.BackendTimeMs > 0 {
+			count++
+			sumBackend += u.BackendTimeMs
+			gw := u.ResponseTimeMs - u.BackendTimeMs
+			if gw < 0 {
+				gw = 0
+			}
+			sumGateway += gw
+		}
+	}
+	if count == 0 {
+		return 0, 0, 0
+	}
+	return float64(sumBackend) / float64(count), float64(sumGateway) / float64(count), count
+}
+
 func cloneProduct(p *ApiProduct) *ApiProduct {
 	if p == nil {
 		return nil
@@ -418,11 +534,23 @@ func cloneProduct(p *ApiProduct) *ApiProduct {
 	return &q
 }
 
+func copyStringMap(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 func cloneDefinition(d *ApiDefinition) *ApiDefinition {
 	if d == nil {
 		return nil
 	}
 	c := *d
+	c.AddHeaders = copyStringMap(d.AddHeaders)
 	return &c
 }
 

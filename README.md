@@ -58,18 +58,111 @@ Set `APIM_CONFIG` if your config path differs. See [Getting started](docs/gettin
 
 ## Configuration
 
-ApimCore is configured via a single YAML file (default: `config.yaml`). Main sections:
+ApimCore is configured via a single YAML file (default: `config.yaml`). Below is a complete example with explanations. Copy and adapt to your environment.
 
-| Section        | Purpose                                  |
-|----------------|------------------------------------------|
-| `gateway`      | Listen address for the API proxy         |
-| `server`       | Listen address for admin, metrics, portal |
-| `products`     | API products and backend routes          |
-| `subscriptions`| API keys and product access              |
-| `security`     | Rate limits, IP blacklist, geo-fencing   |
-| `devportal`    | Developer portal path and toggle         |
+```yaml
+gateway:
+  listen: ":8080"
+  backend_timeout_seconds: 30
 
-Full reference: [Configuration guide](docs/configuration.md). Example configs: [docs/examples](docs/examples/).
+server:
+  listen: ":8081"
+
+products:
+  - name: "Educational Services"
+    slug: "edu"
+    description: "Core educational management APIs"
+    apis:
+      - name: "EduCore"
+        path_prefix: "/educore"
+        target_url: "http://localhost:8082"
+      - name: "IntegraCore"
+        path_prefix: "/integra"
+        target_url: "http://localhost:8083"
+        host: "api.example.com"
+
+  - name: "Platform Services"
+    slug: "platform"
+    description: "Identity and campus infrastructure"
+    apis:
+      - name: "IdentityCore"
+        path_prefix: "/identity"
+        target_url: "http://localhost:8084"
+        openapi_spec_url: "https://api.example.com/identity/openapi.json"
+        version: "v1"
+
+subscriptions:
+  - developer_id: "default-dev"
+    product_slug: "edu"
+    plan: "premium"
+    keys:
+      - name: "Default Key"
+        value: "dev-key-123"
+  - developer_id: "another-dev"
+    product_slug: "platform"
+    plan: "basic"
+    keys:
+      - name: "Platform Key"
+        value: "platform-secret-456"
+
+security:
+  ip_blacklist:
+    - "1.2.3.4"
+    - "192.168.100.0/24"
+  allowed_countries:
+    - "BR"
+    - "US"
+    - "Local"
+  rate_limit:
+    enabled: true
+    requests_per_second: 10
+    burst: 20
+
+devportal:
+  enabled: true
+  path: "/devportal"
+```
+
+**Section reference**
+
+| Section | Field | Description |
+|---------|-------|-------------|
+| **gateway** | `listen` | Address and port for the API proxy (e.g. `:8080` or `0.0.0.0:8080`). Incoming requests hit this first. |
+| | `backend_timeout_seconds` | Max time to wait for each backend response. Default: 30. |
+| **server** | `listen` | Address for admin API, metrics, health, and developer portal (e.g. `:8081`). |
+| **products** | | List of API products. Each product groups one or more APIs. |
+| | `name` | Human-readable product name. |
+| | `slug` | Short identifier. Must be unique. Used by `subscriptions` to link keys to products. |
+| | `description` | Optional description. |
+| | **apis** | List of APIs in this product. |
+| | `name` | API name (for display and metrics). |
+| | `path_prefix` | URL path prefix. Requests starting with this path are routed to the backend (e.g. `/educore`, `/identity`). |
+| | `target_url` | Backend URL (e.g. `http://localhost:8082`). |
+| | `host` | Optional. Match by `Host` header. Use `*` or leave empty for path-only matching. |
+| | `add_headers` | Optional. Map of headers added to every request to this backend (e.g. multi-tenant or backend identification). |
+| | `strip_path_prefix` | Optional. When true, path prefix is removed before forwarding (e.g. `/api/v1/users` with prefix `/api/v1` becomes `/users`). |
+| | `openapi_spec_url` | Optional. URL to OpenAPI spec for the developer portal. |
+| | `version` | Optional. API version. |
+| **subscriptions** | | Maps developers and keys to products. |
+| | `developer_id` | Developer identifier. |
+| | `product_slug` | Must match a product `slug`. Grants access to that product's APIs. |
+| | `tenant_id` | Optional. When set, gateway adds `X-Tenant-Id` header to backend requests (multi-tenant backends). |
+| | `plan` | Plan name (e.g. "premium", "basic"). Informational. |
+| | **keys** | API keys for this subscription. Clients send the key in the `X-Api-Key` header. |
+| | `name` | Key label. |
+| | `value` | Secret value. Treat like a password; keep it private. |
+| **security** | | Optional. Controls access and limits. |
+| | `ip_blacklist` | List of IPs or CIDRs to block (e.g. `1.2.3.4`, `192.168.100.0/24`). |
+| | `allowed_countries` | If non-empty, only requests from these country codes are allowed. Empty means all countries. Use `Local` for localhost. |
+| | **rate_limit** | Per-IP rate limiting. |
+| | `enabled` | Turn rate limiting on or off. |
+| | `requests_per_second` | Max requests per second per IP. |
+| | `burst` | Max burst size (additional tokens). |
+| **devportal** | | Embedded developer portal. |
+| | `enabled` | Enable or disable the portal. |
+| | `path` | URL path where the portal is served (e.g. `/devportal`). |
+
+Full reference: [Configuration guide](docs/configuration.md). More examples: [docs/examples](docs/examples/) (basic, security, multi-tenant, geo-fencing, **domain routing**, **headers and path rewrite** for tenant_id, add_headers, strip_path_prefix).
 
 ---
 
@@ -100,6 +193,8 @@ Example:
 curl http://localhost:8081/health
 ```
 
+Metrics: Prometheus scrape at `/metrics`. Aggregated summary at `GET /api/admin/metrics/summary?hours=1` (P95/P99 latency, error rate, RPS per route, rate limit hits, usage by tenant and version, backend vs gateway latency).
+
 ---
 
 ## Documentation
@@ -112,7 +207,7 @@ curl http://localhost:8081/health
 | [Deployment](docs/deployment.md)       | AWS, Azure, Kubernetes; ingress, egress, internal vs external |
 | [Production readiness](docs/tui-production-readiness.md) | TUI and gateway production checklist |
 
-Example configurations: [docs/examples](docs/examples/) (basic, security, multi-tenant, geo-fencing).
+Example configurations: [docs/examples](docs/examples/) (basic, security, multi-tenant, geo-fencing, domain routing, headers and path rewrite).
 
 ---
 

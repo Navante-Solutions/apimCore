@@ -25,19 +25,24 @@ type SystemStats struct {
 }
 
 type TrafficEvent struct {
-	Timestamp time.Time
-	Method    string
-	Path      string
-	Backend   string
-	Status    int
-	Latency   int64
-	TenantID  string
-	Country   string
-	IP        string
-	Action    string // "ALLOWED", "BLOCKED", "RATE_LIMIT"
+	Timestamp       time.Time
+	Method          string
+	Path            string
+	Backend         string
+	Status          int
+	Latency         int64
+	BackendLatency  int64
+	TenantID        string
+	Country         string
+	IP              string
+	Action          string
 }
 
-// Broadcaster manages telemetry distribution
+const (
+	TrafficChanBufferSize = 2000
+	StatsChanBufferSize   = 10
+)
+
 type Broadcaster struct {
 	trafficChan chan TrafficEvent
 	statsChan   chan SystemStats
@@ -46,8 +51,8 @@ type Broadcaster struct {
 
 func NewBroadcaster() *Broadcaster {
 	return &Broadcaster{
-		trafficChan: make(chan TrafficEvent, 100), // Buffered to handle TUI lag
-		statsChan:   make(chan SystemStats, 10),
+		trafficChan: make(chan TrafficEvent, TrafficChanBufferSize),
+		statsChan:   make(chan SystemStats, StatsChanBufferSize),
 		stopChan:    make(chan struct{}),
 	}
 }

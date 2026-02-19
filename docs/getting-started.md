@@ -87,6 +87,12 @@ Prometheus metrics:
 curl http://localhost:8081/metrics
 ```
 
+Metrics summary (JSON) with P95/P99 latency, error rate, RPS per route, rate limit hits, usage by tenant and version, and backend vs gateway latency:
+
+```bash
+curl "http://localhost:8081/api/admin/metrics/summary?hours=1"
+```
+
 ## Next steps
 
 - Copy or adapt an [example configuration](examples/) and point `--config` at it.

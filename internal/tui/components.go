@@ -178,6 +178,11 @@ func (m Model) renderFooter() string {
 	return lipgloss.NewStyle().Background(lipgloss.Color("#353535")).Width(width).MaxWidth(width).Render(footer)
 }
 
+const (
+	GlobalMapWidth         = 122
+	TrafficRightPanelWidth = 32
+)
+
 func (m Model) renderSparkline(data []int64, width int) string {
 	if len(data) == 0 {
 		return strings.Repeat("─", width)

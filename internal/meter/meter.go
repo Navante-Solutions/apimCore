@@ -9,10 +9,12 @@ import (
 )
 
 type Meter struct {
-	store      *store.Store
-	requestCnt *prometheus.CounterVec
-	requestLat *prometheus.HistogramVec
-	usageTotal prometheus.Counter
+	store           *store.Store
+	requestCnt      *prometheus.CounterVec
+	requestLat      *prometheus.HistogramVec
+	backendLat      *prometheus.HistogramVec
+	usageTotal      prometheus.Counter
+	rateLimitHits   prometheus.Counter
 }
 
 func New(s *store.Store, reg prometheus.Registerer) *Meter {
@@ -26,7 +28,15 @@ func New(s *store.Store, reg prometheus.Registerer) *Meter {
 	requestLat := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "apim_request_duration_seconds",
-			Help:    "Request latency in seconds",
+			Help:    "Total request latency (gateway + backend) in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"backend", "path_prefix"},
+	)
+	backendLat := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "apim_request_backend_duration_seconds",
+			Help:    "Backend-only latency in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
 		[]string{"backend", "path_prefix"},
@@ -37,20 +47,31 @@ func New(s *store.Store, reg prometheus.Registerer) *Meter {
 			Help: "Total usage records stored",
 		},
 	)
+	rateLimitHits := prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "apim_rate_limit_hits_total",
+			Help: "Total requests rejected by rate limiter",
+		},
+	)
 	if reg != nil {
-		reg.MustRegister(requestCnt, requestLat, usageTotal)
+		reg.MustRegister(requestCnt, requestLat, backendLat, usageTotal, rateLimitHits)
 	}
 	return &Meter{
-		store:      s,
-		requestCnt: requestCnt,
-		requestLat: requestLat,
-		usageTotal: usageTotal,
+		store:         s,
+		requestCnt:    requestCnt,
+		requestLat:    requestLat,
+		backendLat:    backendLat,
+		usageTotal:    usageTotal,
+		rateLimitHits: rateLimitHits,
 	}
 }
 
-func (m *Meter) Record(backend, pathPrefix, method string, status int, durationMs int64, subID, apiDefID int64, tenantID string) {
+func (m *Meter) Record(backend, pathPrefix, method string, status int, totalMs, backendMs int64, subID, apiDefID int64, tenantID string) {
 	m.requestCnt.WithLabelValues(backend, method, pathPrefix, statusLabel(status)).Inc()
-	m.requestLat.WithLabelValues(backend, pathPrefix).Observe(float64(durationMs) / 1000.0)
+	m.requestLat.WithLabelValues(backend, pathPrefix).Observe(float64(totalMs) / 1000.0)
+	if backendMs > 0 {
+		m.backendLat.WithLabelValues(backend, pathPrefix).Observe(float64(backendMs) / 1000.0)
+	}
 	m.store.RecordUsage(store.RequestUsage{
 		SubscriptionID:  subID,
 		ApiDefinitionID: apiDefID,
@@ -58,9 +79,14 @@ func (m *Meter) Record(backend, pathPrefix, method string, status int, durationM
 		Method:          method,
 		Path:            pathPrefix,
 		StatusCode:      status,
-		ResponseTimeMs:  durationMs,
+		ResponseTimeMs:  totalMs,
+		BackendTimeMs:   backendMs,
 	})
 	m.usageTotal.Inc()
+}
+
+func (m *Meter) IncrementRateLimit() {
+	m.rateLimitHits.Inc()
 }
 
 func statusLabel(code int) string {

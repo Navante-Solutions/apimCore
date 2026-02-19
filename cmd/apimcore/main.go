@@ -29,6 +29,62 @@ import (
 	"github.com/navantesolutions/apimcore/internal/tui"
 )
 
+const (
+	DefaultConfigPath       = "config.yaml"
+	HotReloadInterval       = 5 * time.Second
+	MetricsTickerInterval   = 2 * time.Second
+	TuiTrafficBatchBuffer   = 100
+	TuiTrafficBatchSize     = 50
+	TuiTrafficBatchInterval = 40 * time.Millisecond
+	MetricsHistorySince     = -1 * time.Hour
+	CPUPercentSampleDur     = 100 * time.Millisecond
+	DefaultDBPath           = "data/apimcore.db"
+	NodeIDEnv               = "APIM_NODE_ID"
+	ClusterNodesEnv         = "APIM_CLUSTER_NODES"
+	DefaultNodeID           = "local"
+	DefaultClusterNodes     = "1"
+)
+
+//go:embed all:web/devportal
+var devportalFS embed.FS
+
+var processStartTime = time.Now()
+
+type appFlags struct {
+	configPath string
+	hotReload  bool
+	useTUI        bool
+	useDB         bool
+	useFileLog    string
+	useFileLogAll string
+}
+
+func parseFlags() appFlags {
+	flag.Usage = printHelp
+	for _, arg := range os.Args[1:] {
+		if arg == "-h" || arg == "--help" {
+			printHelp()
+			os.Exit(0)
+		}
+	}
+	var f appFlags
+	flag.StringVar(&f.configPath, "f", "", "Path to config file (default: config.yaml or APIM_CONFIG)")
+	flag.StringVar(&f.configPath, "config", "", "Path to config file (same as -f)")
+	flag.BoolVar(&f.hotReload, "hot-reload", false, "Watch config file and reload on change")
+	flag.BoolVar(&f.useTUI, "tui", false, "Enable interactive TUI monitor")
+	flag.BoolVar(&f.useDB, "use-db", false, "Persist security events to SQLite at ./data/apimcore.db")
+	flag.StringVar(&f.useFileLog, "use-file-log", "", "Persist security events (BLOCKED/RATE_LIMIT only) to JSONL at PATH (ignored if -use-db)")
+	flag.StringVar(&f.useFileLogAll, "file-log-all", "", "Persist ALL traffic to JSONL at PATH (for debugging/perf tests)")
+	flag.Parse()
+	if f.configPath == "" {
+		f.configPath = os.Getenv("APIM_CONFIG")
+	}
+	if f.configPath == "" {
+		f.configPath = DefaultConfigPath
+	}
+	return f
+}
+
 func printHelp() {
 	fmt.Fprintf(os.Stderr, `ApimCore - API gateway with config-driven products, subscriptions, and security.
 
@@ -40,7 +96,8 @@ OPTIONS
   -tui                 Start the interactive TUI (traffic, geo, config, system).
   -hot-reload          Watch config file and reload on change. Without this, use [R] in TUI or restart to apply changes.
   -use-db               Persist BLOCKED/RATE_LIMIT events to SQLite at ./data/apimcore.db (creates dir if needed).
-  -use-file-log PATH    Persist BLOCKED/RATE_LIMIT events to a JSONL file at PATH. Ignored if -use-db is set.
+  -use-file-log PATH    Persist only BLOCKED/RATE_LIMIT to JSONL at PATH. Ignored if -use-db is set.
+  -file-log-all PATH    Persist ALL traffic (every request) to JSONL at PATH. Use for debugging or perf tests.
   -h, -help             Show this help and exit.
 
 ENVIRONMENT
@@ -63,9 +120,83 @@ DOCUMENTATION
 `)
 }
 
-type tuiWriter struct {
-	p *tea.Program
+func loadConfig(path string) (cfg *config.Config, noConfigFile bool) {
+	if _, err := os.Stat(path); err != nil && os.IsNotExist(err) {
+		log.Printf("config file not found: %s (using defaults; gateway will run with no products)", path)
+		return config.Default(), true
+	}
+	var err error
+	cfg, err = config.Load(path)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+	return cfg, false
 }
+
+func setupPersistence(useDB bool, useFileLog string) (securitylog.Logger, string) {
+	if useDB {
+		if err := os.MkdirAll(filepath.Dir(DefaultDBPath), 0755); err != nil {
+			log.Printf("could not create data dir for -use-db: %v", err)
+			return nil, ""
+		}
+		l, err := securitylog.New("sqlite:" + DefaultDBPath)
+		if err != nil {
+			log.Printf("security log: %v (events will not be persisted)", err)
+			return nil, ""
+		}
+		return l, "sqlite:" + DefaultDBPath
+	}
+	path := useFileLog
+	if path == "" {
+		path = os.Getenv("APIM_FILE_LOG")
+	}
+	if path == "" {
+		return nil, ""
+	}
+	l, err := securitylog.New(path)
+	if err != nil {
+		log.Printf("security log: %v (events will not be persisted)", err)
+		return nil, ""
+	}
+	return l, path
+}
+
+func setupMuxes(st *store.Store, gw *gateway.Gateway, reg *prometheus.Registry) (gatewayMux, serverMux *http.ServeMux) {
+	gatewayMux = http.NewServeMux()
+	gatewayMux.Handle("/", gw)
+
+	serverMux = http.NewServeMux()
+	serverMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	})
+	serverMux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	})
+	serverMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	admin.New(st, "/api/admin", gw).Register(serverMux)
+	devportal.New(st, "/devportal").Register(serverMux)
+	dpFS, _ := fs.Sub(devportalFS, "web/devportal")
+	serverMux.Handle("/devportal/", http.StripPrefix("/devportal", http.FileServer(http.FS(dpFS))))
+	return gatewayMux, serverMux
+}
+
+func runGateway(listen string, mux *http.ServeMux) {
+	log.Printf("apimcore gateway listening on %s", listen)
+	if err := http.ListenAndServe(listen, mux); err != nil {
+		log.Fatalf("gateway: %v", err)
+	}
+}
+
+func runManagementServer(listen string, mux *http.ServeMux) {
+	log.Printf("apimcore server listening on %s (admin, devportal, metrics)", listen)
+	if err := http.ListenAndServe(listen, mux); err != nil {
+		log.Fatalf("server: %v", err)
+	}
+}
+
+type tuiWriter struct{ p *tea.Program }
 
 func (tw *tuiWriter) Write(p []byte) (n int, err error) {
 	if tw.p != nil {
@@ -74,49 +205,91 @@ func (tw *tuiWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-//go:embed all:web/devportal
-var devportalFS embed.FS
+func runTUI(opts struct {
+	cfg          *config.Config
+	st           *store.Store
+	gw           *gateway.Gateway
+	hb           *hub.Broadcaster
+	m            *meter.Meter
+	configPath   string
+	noConfigFile bool
+	hotReload    bool
+	trafficChan  chan []hub.TrafficEvent
+	serverMux    *http.ServeMux
+	serverListen string
+}) {
+	nodeID := os.Getenv(NodeIDEnv)
+	if nodeID == "" {
+		nodeID, _ = os.Hostname()
+	}
+	if nodeID == "" {
+		nodeID = DefaultNodeID
+	}
+	clusterNodes := os.Getenv(ClusterNodesEnv)
+	if clusterNodes == "" {
+		clusterNodes = DefaultClusterNodes
+	}
 
-var processStartTime = time.Now()
+	onReload := func() bool {
+		newCfg, err := config.Load(opts.configPath)
+		if err != nil {
+			return false
+		}
+		opts.gw.UpdateConfig(newCfg)
+		opts.st.PopulateFromConfig(newCfg)
+		return true
+	}
+	model := tui.NewModel(onReload, opts.st, opts.gw, opts.hb, opts.configPath, nodeID, clusterNodes, processStartTime, opts.noConfigFile, opts.hotReload)
+	p := tea.NewProgram(model, tea.WithAltScreen())
+	log.SetOutput(&tuiWriter{p: p})
+
+	go func() {
+		ticker := time.NewTicker(MetricsTickerInterval)
+		since := time.Now().Add(MetricsHistorySince)
+		for range ticker.C {
+			statsTotal, _, _ := opts.m.StatsSince(since)
+			avgLat := opts.m.AvgLatencySince(since)
+			blocked, rateLimited := opts.gw.Stats()
+			cpuPct := 0.0
+			if percents, err := cpu.Percent(CPUPercentSampleDur, false); err == nil && len(percents) > 0 {
+				cpuPct = percents[0] / 100.0
+			}
+			memUsedMB := uint64(0)
+			memTotalMB := uint64(0)
+			if v, err := mem.VirtualMemory(); err == nil {
+				memUsedMB = v.Used / (1024 * 1024)
+				memTotalMB = v.Total / (1024 * 1024)
+			}
+			p.Send(tui.MetricsUpdateMsg{TotalRequests: statsTotal, AvgLatency: avgLat})
+			p.Send(hub.SystemStats{
+				TotalRequests: statsTotal, AvgLatency: avgLat,
+				RateLimited: rateLimited, Blocked: blocked,
+				Uptime: time.Since(processStartTime), CPUUsage: cpuPct,
+				MemoryUsageMB: memUsedMB, MemoryTotalMB: memTotalMB,
+			})
+		}
+	}()
+
+	go func() {
+		for batch := range opts.trafficChan {
+			if len(batch) > 0 {
+				p.Send(tui.TrafficBatchMsg(batch))
+			}
+		}
+	}()
+
+	go runManagementServer(opts.serverListen, opts.serverMux)
+
+	if _, err := p.Run(); err != nil {
+		fmt.Printf("Error running TUI: %v", err)
+		os.Exit(1)
+	}
+}
 
 func main() {
-	flag.Usage = printHelp
-	for _, arg := range os.Args[1:] {
-		if arg == "-h" || arg == "--help" {
-			printHelp()
-			os.Exit(0)
-		}
-	}
-	var configPath string
-	flag.StringVar(&configPath, "f", "", "Path to config file (default: config.yaml or APIM_CONFIG)")
-	flag.StringVar(&configPath, "config", "", "Path to config file (same as -f)")
-	hotReload := flag.Bool("hot-reload", false, "Watch config file and reload on change (use [R] in TUI for manual reload)")
-	useTUI := flag.Bool("tui", false, "Enable interactive TUI monitor")
-	useDB := flag.Bool("use-db", false, "Persist security events to SQLite at ./data/apimcore.db")
-	useFileLog := flag.String("use-file-log", "", "Persist security events to JSONL file at PATH (ignored if -use-db)")
-	flag.Parse()
+	flags := parseFlags()
 
-	if configPath == "" {
-		configPath = os.Getenv("APIM_CONFIG")
-	}
-	if configPath == "" {
-		configPath = "config.yaml"
-	}
-
-	var cfg *config.Config
-	noConfigFile := false
-	if _, err := os.Stat(configPath); err != nil && os.IsNotExist(err) {
-		log.Printf("config file not found: %s (using defaults; gateway will run with no products)", configPath)
-		cfg = config.Default()
-		noConfigFile = true
-	} else {
-		var err error
-		cfg, err = config.Load(configPath)
-		if err != nil {
-			log.Fatalf("load config: %v", err)
-		}
-	}
-
+	cfg, noConfigFile := loadConfig(flags.configPath)
 	st := store.NewStore()
 	st.PopulateFromConfig(cfg)
 
@@ -125,59 +298,74 @@ func main() {
 	hb := hub.NewBroadcaster()
 	gw := gateway.New(cfg, st, m, hb)
 
-	securityLogPath := ""
-	if *useDB {
-		dbPath := "data/apimcore.db"
-		if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
-			log.Printf("could not create data dir for -use-db: %v", err)
-			securityLogPath = ""
-		} else {
-			securityLogPath = "sqlite:" + dbPath
-		}
-	} else {
-		securityLogPath = *useFileLog
-		if securityLogPath == "" {
-			securityLogPath = os.Getenv("APIM_FILE_LOG")
-		}
-	}
-	secLog, err := securitylog.New(securityLogPath)
-	if err != nil {
-		log.Printf("security log: %v (events will not be persisted)", err)
-	} else if secLog != nil {
+	secLog, secLogPath := setupPersistence(flags.useDB, flags.useFileLog)
+	if secLog != nil {
 		defer secLog.Close()
-		log.Printf("security events logged to %s", securityLogPath)
+		log.Printf("security events logged to %s", secLogPath)
 	}
 
-	var tuiTrafficChan chan hub.TrafficEvent
-	if *useTUI {
-		tuiTrafficChan = make(chan hub.TrafficEvent, 100)
+	var allTrafficLog securitylog.Logger
+	if flags.useFileLogAll != "" {
+		var err error
+		allTrafficLog, err = securitylog.NewFileLoggerAll(flags.useFileLogAll)
+		if err != nil {
+			log.Printf("file-log-all: %v", err)
+		} else {
+			defer allTrafficLog.Close()
+			log.Printf("all traffic logged to %s", flags.useFileLogAll)
+		}
+	}
+
+	var tuiTrafficChan chan []hub.TrafficEvent
+	if flags.useTUI {
+		tuiTrafficChan = make(chan []hub.TrafficEvent, TuiTrafficBatchBuffer)
 	}
 	go func() {
-		for ev := range hb.TrafficChan() {
-			if secLog != nil && (ev.Action == "BLOCKED" || ev.Action == "RATE_LIMIT") {
-				secLog.Append(ev)
-			}
-			if tuiTrafficChan != nil {
-				select {
-				case tuiTrafficChan <- ev:
-				default:
+		var batch []hub.TrafficEvent
+		ticker := time.NewTicker(TuiTrafficBatchInterval)
+		for {
+			select {
+			case ev, ok := <-hb.TrafficChan():
+				if !ok {
+					if tuiTrafficChan != nil && len(batch) > 0 {
+						tuiTrafficChan <- append([]hub.TrafficEvent(nil), batch...)
+					}
+					return
+				}
+				if secLog != nil && (ev.Action == "BLOCKED" || ev.Action == "RATE_LIMIT") {
+					secLog.Append(ev)
+				}
+				if allTrafficLog != nil {
+					allTrafficLog.Append(ev)
+				}
+				if tuiTrafficChan != nil {
+					batch = append(batch, ev)
+					if len(batch) >= TuiTrafficBatchSize {
+						tuiTrafficChan <- append([]hub.TrafficEvent(nil), batch...)
+						batch = nil
+					}
+				}
+			case <-ticker.C:
+				if tuiTrafficChan != nil && len(batch) > 0 {
+					tuiTrafficChan <- append([]hub.TrafficEvent(nil), batch...)
+					batch = nil
 				}
 			}
 		}
 	}()
 
-	if *hotReload {
+	if flags.hotReload {
 		go func() {
 			lastMod := time.Now()
 			for {
-				time.Sleep(5 * time.Second)
-				info, err := os.Stat(configPath)
+				time.Sleep(HotReloadInterval)
+				info, err := os.Stat(flags.configPath)
 				if err != nil {
 					continue
 				}
 				if info.ModTime().After(lastMod) {
 					log.Printf("config file changed, reloading...")
-					newCfg, err := config.Load(configPath)
+					newCfg, err := config.Load(flags.configPath)
 					if err != nil {
 						log.Printf("failed to reload config: %v", err)
 						continue
@@ -189,117 +377,29 @@ func main() {
 			}
 		}()
 	}
-	gatewayMux := http.NewServeMux()
-	gatewayMux.Handle("/", gw)
 
-	serverMux := http.NewServeMux()
-	serverMux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-	})
-	serverMux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-	})
-	serverMux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	adminHandler := admin.New(st, "/api/admin")
-	adminHandler.Register(serverMux)
-	devPortalHandler := devportal.New(st, "/devportal")
-	devPortalHandler.Register(serverMux)
-	dpFS, _ := fs.Sub(devportalFS, "web/devportal")
-	serverMux.Handle("/devportal/", http.StripPrefix("/devportal", http.FileServer(http.FS(dpFS))))
+	gatewayMux, serverMux := setupMuxes(st, gw, reg)
+	go runGateway(cfg.Gateway.Listen, gatewayMux)
 
-	go func() {
-		log.Printf("apimcore gateway listening on %s", cfg.Gateway.Listen)
-		if err := http.ListenAndServe(cfg.Gateway.Listen, gatewayMux); err != nil {
-			log.Fatalf("gateway: %v", err)
-		}
-	}()
-
-	if *useTUI {
-		nodeID := os.Getenv("APIM_NODE_ID")
-		if nodeID == "" {
-			nodeID, _ = os.Hostname()
-		}
-		if nodeID == "" {
-			nodeID = "local"
-		}
-		clusterNodes := os.Getenv("APIM_CLUSTER_NODES")
-		if clusterNodes == "" {
-			clusterNodes = "1"
-		}
-
-		var p *tea.Program
-		tuiModel := tui.NewModel(func() bool {
-			newCfg, err := config.Load(configPath)
-			if err != nil {
-				return false
-			}
-			gw.UpdateConfig(newCfg)
-			st.PopulateFromConfig(newCfg)
-			return true
-		}, st, gw, hb, configPath, nodeID, clusterNodes, processStartTime, noConfigFile, *hotReload)
-
-		p = tea.NewProgram(tuiModel, tea.WithAltScreen())
-		log.SetOutput(&tuiWriter{p: p})
-
-		go func() {
-			ticker := time.NewTicker(2 * time.Second)
-			since := time.Now().Add(-1 * time.Hour)
-			for range ticker.C {
-				statsTotal, _, _ := m.StatsSince(since)
-				avgLat := m.AvgLatencySince(since)
-				blocked, rateLimited := gw.Stats()
-
-				cpuPct := 0.0
-				if percents, err := cpu.Percent(100*time.Millisecond, false); err == nil && len(percents) > 0 {
-					cpuPct = percents[0] / 100.0
-				}
-				memUsedMB := uint64(0)
-				memTotalMB := uint64(0)
-				if v, err := mem.VirtualMemory(); err == nil {
-					memUsedMB = v.Used / (1024 * 1024)
-					memTotalMB = v.Total / (1024 * 1024)
-				}
-
-				p.Send(tui.MetricsUpdateMsg{
-					TotalRequests: statsTotal,
-					AvgLatency:    avgLat,
-				})
-				p.Send(hub.SystemStats{
-					TotalRequests: statsTotal,
-					AvgLatency:    avgLat,
-					RateLimited:   rateLimited,
-					Blocked:       blocked,
-					Uptime:        time.Since(processStartTime),
-					CPUUsage:      cpuPct,
-					MemoryUsageMB: memUsedMB,
-					MemoryTotalMB: memTotalMB,
-				})
-			}
-		}()
-
-		go func() {
-			for pkt := range tuiTrafficChan {
-				p.Send(pkt)
-			}
-		}()
-
-		go func() {
-			log.Printf("apimcore server listening on %s (admin, devportal, metrics)", cfg.Server.Listen)
-			if err := http.ListenAndServe(cfg.Server.Listen, serverMux); err != nil {
-				log.Fatalf("server: %v", err)
-			}
-		}()
-
-		if _, err := p.Run(); err != nil {
-			fmt.Printf("Error running TUI: %v", err)
-			os.Exit(1)
-		}
+	if flags.useTUI {
+		runTUI(struct {
+			cfg          *config.Config
+			st           *store.Store
+			gw           *gateway.Gateway
+			hb           *hub.Broadcaster
+			m            *meter.Meter
+			configPath   string
+			noConfigFile bool
+			hotReload    bool
+			trafficChan  chan []hub.TrafficEvent
+			serverMux    *http.ServeMux
+			serverListen string
+		}{
+			cfg: cfg, st: st, gw: gw, hb: hb, m: m,
+			configPath: flags.configPath, noConfigFile: noConfigFile, hotReload: flags.hotReload,
+			trafficChan: tuiTrafficChan, serverMux: serverMux, serverListen: cfg.Server.Listen,
+		})
 	} else {
-		log.Printf("apimcore server listening on %s (admin, devportal, metrics)", cfg.Server.Listen)
-		if err := http.ListenAndServe(cfg.Server.Listen, serverMux); err != nil {
-			log.Fatalf("server: %v", err)
-		}
+		runManagementServer(cfg.Server.Listen, serverMux)
 	}
 }

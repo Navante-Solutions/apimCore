@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
-
-	"github.com/navantesolutions/apimcore/internal/hub"
 )
 
 // IPBlacklistMiddleware blocks requests from IPs in the blacklist.
@@ -31,18 +29,7 @@ func (g *Gateway) IPBlacklistMiddleware() Middleware {
 			if blocked {
 				atomic.AddInt64(&g.blockedCount, 1)
 				if g.Hub != nil {
-					g.Hub.PublishTraffic(hub.TrafficEvent{
-						Timestamp: time.Now(),
-						Method:    r.Method,
-						Path:      r.URL.Path,
-						Backend:   "",
-						Status:    http.StatusForbidden,
-						Latency:   0,
-						TenantID:  "",
-						Country:   "",
-						IP:        remoteIP,
-						Action:    "BLOCKED",
-					})
+					g.Hub.PublishTraffic(trafficEventFromRequest(r, time.Now(), "BLOCKED", http.StatusForbidden, 0, 0, "", "", remoteIP))
 				}
 				http.Error(w, "Forbidden: IP Blacklisted", http.StatusForbidden)
 				return
@@ -71,7 +58,7 @@ func (g *Gateway) GeoIPMiddleware() Middleware {
 				}
 			}
 
-			r.Header.Set("X-Geo-Country", country)
+			r.Header.Set(HeaderGeoCountry, country)
 
 			g.securityMu.Lock()
 			allowed := len(g.allowedGeo) == 0 || g.allowedGeo[country]
@@ -80,18 +67,7 @@ func (g *Gateway) GeoIPMiddleware() Middleware {
 			if !allowed {
 				atomic.AddInt64(&g.blockedCount, 1)
 				if g.Hub != nil {
-					g.Hub.PublishTraffic(hub.TrafficEvent{
-						Timestamp: time.Now(),
-						Method:    r.Method,
-						Path:      r.URL.Path,
-						Backend:   "",
-						Status:    http.StatusForbidden,
-						Latency:   0,
-						TenantID:  "",
-						Country:   country,
-						IP:        remoteIP,
-						Action:    "BLOCKED",
-					})
+					g.Hub.PublishTraffic(trafficEventFromRequest(r, time.Now(), "BLOCKED", http.StatusForbidden, 0, 0, "", "", remoteIP))
 				}
 				http.Error(w, "Forbidden: Geo-fenced", http.StatusForbidden)
 				return

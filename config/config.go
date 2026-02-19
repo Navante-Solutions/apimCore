@@ -6,6 +6,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	DefaultGatewayListen        = ":8080"
+	DefaultServerListen         = ":8081"
+	DefaultBackendTimeoutSec    = 30
+	DefaultDevPortalPath        = "/devportal"
+)
+
 type Config struct {
 	Gateway       GatewayConfig        `yaml:"gateway"`
 	Server        ServerConfig         `yaml:"server"`
@@ -32,18 +39,21 @@ type ProductConfig struct {
 }
 
 type ApiConfig struct {
-	Name           string `yaml:"name"`
-	Host           string `yaml:"host"`
-	PathPrefix     string `yaml:"path_prefix"`
-	BackendURL     string `yaml:"target_url"`
-	OpenAPISpecURL string `yaml:"openapi_spec_url"`
-	Version        string `yaml:"version"`
+	Name            string            `yaml:"name"`
+	Host            string            `yaml:"host"`
+	PathPrefix      string            `yaml:"path_prefix"`
+	BackendURL      string            `yaml:"target_url"`
+	OpenAPISpecURL  string            `yaml:"openapi_spec_url"`
+	Version         string            `yaml:"version"`
+	AddHeaders      map[string]string  `yaml:"add_headers"`
+	StripPathPrefix bool              `yaml:"strip_path_prefix"`
 }
 
 type SubscriptionConfig struct {
 	DeveloperID string      `yaml:"developer_id"`
-	ProductID   int64       `yaml:"product_id"`   // Internal ID mapping
-	ProductSlug string      `yaml:"product_slug"` // YAML lookup
+	ProductID   int64       `yaml:"product_id"`
+	ProductSlug string      `yaml:"product_slug"`
+	TenantID    string      `yaml:"tenant_id"`
 	Plan        string      `yaml:"plan"`
 	Keys        []KeyConfig `yaml:"keys"`
 }
@@ -66,7 +76,7 @@ type SecurityConfig struct {
 
 type RateLimitConfig struct {
 	Enabled bool    `yaml:"enabled"`
-	RPP     float64 `yaml:"requests_per_second"`
+	RPS     float64 `yaml:"requests_per_second"`
 	Burst   int     `yaml:"burst"`
 }
 
@@ -91,16 +101,16 @@ func Load(path string) (*Config, error) {
 
 func setDefaults(c *Config) {
 	if c.Gateway.Listen == "" {
-		c.Gateway.Listen = ":8080"
+		c.Gateway.Listen = DefaultGatewayListen
 	}
 	if c.Gateway.BackendTimeoutSeconds <= 0 {
-		c.Gateway.BackendTimeoutSeconds = 30
+		c.Gateway.BackendTimeoutSeconds = DefaultBackendTimeoutSec
 	}
 	if c.Server.Listen == "" {
-		c.Server.Listen = ":8081"
+		c.Server.Listen = DefaultServerListen
 	}
 	if c.DevPortal.Path == "" {
-		c.DevPortal.Path = "/devportal"
+		c.DevPortal.Path = DefaultDevPortalPath
 	}
 	if c.DevPortal.Enabled {
 		c.DevPortal.Enabled = true

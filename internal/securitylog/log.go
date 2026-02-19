@@ -208,6 +208,10 @@ func eventLine(ev hub.TrafficEvent) []byte {
 	if ev.Action != "BLOCKED" && ev.Action != "RATE_LIMIT" {
 		return nil
 	}
+	return eventLineAny(ev)
+}
+
+func eventLineAny(ev hub.TrafficEvent) []byte {
 	row := struct {
 		Time     string `json:"time"`
 		Action   string `json:"action"`
@@ -217,6 +221,8 @@ func eventLine(ev hub.TrafficEvent) []byte {
 		Path     string `json:"path"`
 		Status   int    `json:"status"`
 		TenantID string `json:"tenant_id,omitempty"`
+		Latency  int64  `json:"latency_ms,omitempty"`
+		Backend  string `json:"backend,omitempty"`
 	}{
 		Time:     ev.Timestamp.Format(time.RFC3339),
 		Action:   ev.Action,
@@ -226,7 +232,73 @@ func eventLine(ev hub.TrafficEvent) []byte {
 		Path:     ev.Path,
 		Status:   ev.Status,
 		TenantID: ev.TenantID,
+		Latency:  ev.Latency,
+		Backend:  ev.Backend,
 	}
 	b, _ := json.Marshal(row)
 	return b
+}
+
+type allTrafficFileLogger struct {
+	ch   chan hub.TrafficEvent
+	done chan struct{}
+	once sync.Once
+}
+
+func NewFileLoggerAll(path string) (Logger, error) {
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	l := &allTrafficFileLogger{ch: make(chan hub.TrafficEvent, asyncBuffer), done: make(chan struct{})}
+	go l.run(f)
+	return l, nil
+}
+
+func (l *allTrafficFileLogger) run(f *os.File) {
+	defer f.Close()
+	for {
+		select {
+		case ev := <-l.ch:
+			line := eventLineAny(ev)
+			if len(line) > 0 {
+				_, _ = f.Write(line)
+				_, _ = f.Write([]byte("\n"))
+			}
+		case <-l.done:
+			for {
+				select {
+				case ev := <-l.ch:
+					line := eventLineAny(ev)
+					if len(line) > 0 {
+						_, _ = f.Write(line)
+						_, _ = f.Write([]byte("\n"))
+					}
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+func (l *allTrafficFileLogger) Close() error {
+	if l == nil || l.ch == nil {
+		return nil
+	}
+	l.once.Do(func() { close(l.done) })
+	return nil
+}
+
+func (l *allTrafficFileLogger) Append(ev hub.TrafficEvent) {
+	if l == nil || l.ch == nil {
+		return
+	}
+	select {
+	case l.ch <- ev:
+	default:
+	}
 }

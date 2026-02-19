@@ -103,9 +103,15 @@ type MetricsUpdateMsg struct {
 type ConfigReloadMsg struct{}
 type tickMsg time.Time
 
+type TrafficBatchMsg []hub.TrafficEvent
+
 type TrafficPacket = hub.TrafficEvent
 
-const sparklineHistoryLen = 20
+const (
+	SparklineHistoryLen = 20
+	TrafficListCap      = 100
+	LogLinesCap         = 1000
+)
 
 type Model struct {
 	TermWidth    int
@@ -157,7 +163,7 @@ func NewModel(onReload func() bool, s *store.Store, g *gateway.Gateway, h *hub.B
 		{Title: "Status", Width: 8},
 		{Title: "Path", Width: 20},
 		{Title: "Backend", Width: 15},
-		{Title: "Lat", Width: 8},
+		{Title: "Lat (GW+BE)", Width: 18},
 	}
 
 	t := table.New(
@@ -365,8 +371,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case LogMsg:
 		m.Logs = append(m.Logs, string(msg))
-		if len(m.Logs) > 1000 {
-			m.Logs = m.Logs[len(m.Logs)-1000:]
+		if len(m.Logs) > LogLinesCap {
+			m.Logs = m.Logs[len(m.Logs)-LogLinesCap:]
 		}
 		if m.Ready {
 			m.Viewport.SetContent(strings.Join(m.Logs, "\n"))
@@ -379,8 +385,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.LastTotalRequests > 0 && msg.TotalRequests >= m.LastTotalRequests {
 			delta := msg.TotalRequests - m.LastTotalRequests
 			m.RequestCountHistory = append(m.RequestCountHistory, delta)
-			if len(m.RequestCountHistory) > sparklineHistoryLen {
-				m.RequestCountHistory = m.RequestCountHistory[len(m.RequestCountHistory)-sparklineHistoryLen:]
+			if len(m.RequestCountHistory) > SparklineHistoryLen {
+				m.RequestCountHistory = m.RequestCountHistory[len(m.RequestCountHistory)-SparklineHistoryLen:]
 			}
 		}
 		m.LastTotalRequests = msg.TotalRequests
@@ -392,8 +398,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.LastTotalRequests > 0 && msg.TotalRequests >= m.LastTotalRequests {
 			delta := msg.TotalRequests - m.LastTotalRequests
 			m.RequestCountHistory = append(m.RequestCountHistory, delta)
-			if len(m.RequestCountHistory) > sparklineHistoryLen {
-				m.RequestCountHistory = m.RequestCountHistory[len(m.RequestCountHistory)-sparklineHistoryLen:]
+			if len(m.RequestCountHistory) > SparklineHistoryLen {
+				m.RequestCountHistory = m.RequestCountHistory[len(m.RequestCountHistory)-SparklineHistoryLen:]
 			}
 		}
 		m.LastTotalRequests = msg.TotalRequests
@@ -422,10 +428,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case hub.TrafficEvent:
 		m.Traffic = append(m.Traffic, msg)
-		if len(m.Traffic) > 100 {
+		if len(m.Traffic) > TrafficListCap {
 			m.Traffic = m.Traffic[1:]
 		}
-		// Highlight DDoS / Blocked
 		if msg.Status == 429 || msg.Status == 403 {
 			m.Alerts = append(m.Alerts, Alert{
 				Message: fmt.Sprintf("Security Event: %d from %s", msg.Status, msg.Country),
@@ -433,7 +438,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Expires: time.Now().Add(5 * time.Second),
 			})
 		}
-		m.updateTrafficTable()
+		return m, nil
+
+	case TrafficBatchMsg:
+		for _, ev := range msg {
+			m.Traffic = append(m.Traffic, ev)
+			if len(m.Traffic) > TrafficListCap {
+				m.Traffic = m.Traffic[1:]
+			}
+			if ev.Status == 429 || ev.Status == 403 {
+				m.Alerts = append(m.Alerts, Alert{
+					Message: fmt.Sprintf("Security Event: %d from %s", ev.Status, ev.Country),
+					Level:   "warn",
+					Expires: time.Now().Add(5 * time.Second),
+				})
+			}
+		}
 		return m, nil
 	}
 
@@ -461,6 +481,14 @@ func (m Model) updateTrafficTable() {
 			statusStr = specialStyle.Render(statusStr)
 		}
 
+		latStr := fmt.Sprintf("%dms", p.Latency)
+		if p.BackendLatency > 0 {
+			gwMs := p.Latency - p.BackendLatency
+			if gwMs < 0 {
+				gwMs = 0
+			}
+			latStr = fmt.Sprintf("%d (%d+%d)ms", p.Latency, gwMs, p.BackendLatency)
+		}
 		rows[i] = table.Row{
 			p.Timestamp.Format("15:04:05"),
 			p.Country,
@@ -468,10 +496,37 @@ func (m Model) updateTrafficTable() {
 			statusStr,
 			p.Path,
 			p.Backend,
-			fmt.Sprintf("%dms", p.Latency),
+			latStr,
 		}
 	}
 	m.TrafficTable.SetRows(rows)
+}
+
+func (m Model) trafficLatencySummary() (avgTotalMs int, avgBackendMs int, avgGatewayMs int) {
+	if len(m.Traffic) == 0 {
+		return -1, -1, -1
+	}
+	var sumTotal int64
+	var sumBackend int64
+	var sumGateway int64
+	var nBackend int
+	for _, p := range m.Traffic {
+		sumTotal += p.Latency
+		if p.BackendLatency > 0 {
+			nBackend++
+			sumBackend += p.BackendLatency
+			gw := p.Latency - p.BackendLatency
+			if gw < 0 {
+				gw = 0
+			}
+			sumGateway += gw
+		}
+	}
+	avgTotalMs = int(sumTotal / int64(len(m.Traffic)))
+	if nBackend == 0 {
+		return avgTotalMs, -1, -1
+	}
+	return avgTotalMs, int(sumBackend / int64(nBackend)), int(sumGateway / int64(nBackend))
 }
 
 func (m Model) dashboardView() string {
@@ -571,8 +626,6 @@ func (m Model) dashboardView() string {
 	)
 }
 
-const globalMapWidth = 122
-
 func (m Model) renderGlobalRightPanel(width int) string {
 	lines := []string{
 		dashboardTitleStyle.Render("THREAT SUMMARY"),
@@ -610,7 +663,7 @@ func (m Model) globalView() string {
 	if bodyWidth < 40 {
 		bodyWidth = 40
 	}
-	leftWidth := globalMapWidth
+	leftWidth := GlobalMapWidth
 	if leftWidth > bodyWidth-24 {
 		leftWidth = bodyWidth - 24
 	}
@@ -709,8 +762,6 @@ func (m Model) portalView() string {
 	)
 }
 
-const trafficRightPanelWidth = 32
-
 func (m Model) renderTrafficRightPanel(width int) string {
 	subtlStyle := lipgloss.NewStyle().Foreground(subtle)
 	lines := []string{dashboardTitleStyle.Render("TRAFFIC")}
@@ -719,11 +770,19 @@ func (m Model) renderTrafficRightPanel(width int) string {
 	if m.SelectedPacket != nil {
 		p := m.SelectedPacket
 		lines = append(lines, headerLabelStyle.Render("SELECTED REQUEST"), "")
-		lines = append(lines, fmt.Sprintf("Method:  %s", p.Method))
-		lines = append(lines, fmt.Sprintf("Path:    %s", p.Path))
-		lines = append(lines, fmt.Sprintf("Status:  %d", p.Status))
-		lines = append(lines, fmt.Sprintf("Latency: %dms", p.Latency))
-		lines = append(lines, fmt.Sprintf("Geo:     %s", p.Country))
+		lines = append(lines, fmt.Sprintf("Method:   %s", p.Method))
+		lines = append(lines, fmt.Sprintf("Path:     %s", p.Path))
+		lines = append(lines, fmt.Sprintf("Status:   %d", p.Status))
+		lines = append(lines, fmt.Sprintf("Total:    %dms", p.Latency))
+		if p.BackendLatency > 0 {
+			gwMs := p.Latency - p.BackendLatency
+			if gwMs < 0 {
+				gwMs = 0
+			}
+			lines = append(lines, fmt.Sprintf("Backend:  %dms", p.BackendLatency))
+			lines = append(lines, fmt.Sprintf("Gateway:  %dms", gwMs))
+		}
+		lines = append(lines, fmt.Sprintf("Geo:      %s", p.Country))
 		lines = append(lines, fmt.Sprintf("IP:      %s", p.IP))
 		lines = append(lines, "")
 		lines = append(lines, headerLabelStyle.Render("ACTIONS"))
@@ -734,6 +793,15 @@ func (m Model) renderTrafficRightPanel(width int) string {
 		lines = append(lines, fmt.Sprintf("Requests: %s", infoStyle.Render(fmt.Sprintf("%d", len(m.Traffic)))))
 		lines = append(lines, fmt.Sprintf("Blocked:  %s", warningStyle.Render(fmt.Sprintf("%d", m.Blocked))))
 		lines = append(lines, fmt.Sprintf("Rate lim: %s", warningStyle.Render(fmt.Sprintf("%d", m.RateLimited))))
+		if total, avgBackend, avgGW := m.trafficLatencySummary(); total >= 0 {
+			lines = append(lines, "")
+			lines = append(lines, headerLabelStyle.Render("LATENCY (last)"))
+			lines = append(lines, fmt.Sprintf("Avg total:   %dms", total))
+			if avgBackend >= 0 {
+				lines = append(lines, fmt.Sprintf("Avg backend: %dms", avgBackend))
+				lines = append(lines, fmt.Sprintf("Avg gateway: %dms", avgGW))
+			}
+		}
 		lines = append(lines, "")
 		lines = append(lines, headerLabelStyle.Render("KEYBOARD"))
 		lines = append(lines, subtlStyle.Render("  Up/Down  Navigate"))
@@ -756,7 +824,7 @@ func (m Model) trafficView() string {
 	if bodyWidth < 1 {
 		bodyWidth = 1
 	}
-	rightWidth := trafficRightPanelWidth
+	rightWidth := TrafficRightPanelWidth
 	if rightWidth > bodyWidth-30 {
 		rightWidth = 0
 	}
@@ -766,6 +834,7 @@ func (m Model) trafficView() string {
 		rightWidth = 0
 	}
 
+	m.updateTrafficTable()
 	m.TrafficTable.SetWidth(leftWidth)
 	tableContent := m.TrafficTable.View()
 
@@ -781,13 +850,21 @@ func (m Model) trafficView() string {
 				Padding(0, 1).
 				Width(leftWidth - 2).
 				MaxWidth(leftWidth - 2)
-			details := detailsStyle.Render(fmt.Sprintf("%s\n\nMethod: %s\nPath: %s\nBackend: %s\nStatus: %d\nLatency: %dms\nTenant: %s\nGeo: %s\nTime: %s",
+			latDetail := fmt.Sprintf("Total: %dms", m.SelectedPacket.Latency)
+			if m.SelectedPacket.BackendLatency > 0 {
+				gwMs := m.SelectedPacket.Latency - m.SelectedPacket.BackendLatency
+				if gwMs < 0 {
+					gwMs = 0
+				}
+				latDetail = fmt.Sprintf("Total: %dms  Backend: %dms  Gateway: %dms", m.SelectedPacket.Latency, m.SelectedPacket.BackendLatency, gwMs)
+			}
+			details := detailsStyle.Render(fmt.Sprintf("%s\n\nMethod: %s\nPath: %s\nBackend: %s\nStatus: %d\n%s\nTenant: %s\nGeo: %s\nTime: %s",
 				dashboardTitleStyle.Render("PACKET DETAILS"),
 				m.SelectedPacket.Method,
 				m.SelectedPacket.Path,
 				m.SelectedPacket.Backend,
 				m.SelectedPacket.Status,
-				m.SelectedPacket.Latency,
+				latDetail,
 				m.SelectedPacket.TenantID,
 				m.SelectedPacket.Country,
 				m.SelectedPacket.Timestamp.Format(time.RFC3339),
@@ -893,7 +970,7 @@ func (m Model) securityView() string {
 	}
 
 	limits := fmt.Sprintf("RATE LIMITING: %s\n", specialStyle.Render("ENABLED"))
-	limits += fmt.Sprintf("RPS: %.2f | Burst: %d\n", cfg.RateLimit.RPP, cfg.RateLimit.Burst)
+	limits += fmt.Sprintf("RPS: %.2f | Burst: %d\n", cfg.RateLimit.RPS, cfg.RateLimit.Burst)
 
 	cardsRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("IP PROTECTION"), blacklistContent)),
@@ -927,20 +1004,91 @@ func (m Model) healthView() string {
 	health += fmt.Sprintf("DevPortal: %s\n", specialStyle.Render("OK"))
 	health += fmt.Sprintf("Store:     %s\n", specialStyle.Render("CONSISTENT"))
 
-	metrics := "PROMETHEUS (LIVE):\n"
-	metrics += fmt.Sprintf("• requests_total: %d\n", m.TotalRequests)
-	metrics += fmt.Sprintf("• latency_avg:   %.2fms\n", m.AvgLatency)
-	metrics += fmt.Sprintf("• errors_rate:   0.0%%\n")
+	since := time.Now().Add(-1 * time.Hour)
+	p95Ms, _ := m.Store.PercentileResponseTimeMsSince(since, 0.95)
+	p99Ms, _ := m.Store.PercentileResponseTimeMsSince(since, 0.99)
+	errRate, totalReqs, _ := m.Store.ErrorRateSince(since)
+	rpsByRoute := m.Store.RPSByRouteSince(since)
+	var totalRPS float64
+	for _, rps := range rpsByRoute {
+		totalRPS += rps
+	}
+	avgBackendMs, avgGatewayMs, backendN := m.Store.AvgBackendVsGatewaySince(since)
+	usageByVer := m.Store.UsageByVersionSince(since)
 
-	cardsRow := lipgloss.JoinHorizontal(lipgloss.Top,
+	metrics := "LAST 1H (from store):\n"
+	metrics += fmt.Sprintf("• P95 / P99:     %.0f / %.0f ms\n", p95Ms, p99Ms)
+	metrics += fmt.Sprintf("• latency_avg:   %.2f ms\n", m.AvgLatency)
+	metrics += fmt.Sprintf("• error_rate:    %.1f%% (%d reqs)\n", errRate*100, totalReqs)
+	metrics += fmt.Sprintf("• RPS (total):   %.1f\n", totalRPS)
+	metrics += fmt.Sprintf("• rate_limit:   %d\n", m.RateLimited)
+	if backendN > 0 {
+		metrics += fmt.Sprintf("• backend avg:   %.0f ms\n", avgBackendMs)
+		metrics += fmt.Sprintf("• gateway avg:   %.0f ms\n", avgGatewayMs)
+	}
+	metrics += fmt.Sprintf("• tenants:       %d\n", len(m.Store.UniqueTenantIDs()))
+	metrics += fmt.Sprintf("• versions:      %d\n", len(usageByVer))
+
+	byTenant := ""
+	for _, tid := range m.Store.UniqueTenantIDs() {
+		n := len(m.Store.UsageByTenant(tid, since))
+		if byTenant != "" {
+			byTenant += ", "
+		}
+		byTenant += fmt.Sprintf("%s:%d", truncateStr(tid, 8), n)
+	}
+	if byTenant == "" {
+		byTenant = "-"
+	}
+	byVersion := ""
+	for ver, n := range usageByVer {
+		if byVersion != "" {
+			byVersion += ", "
+		}
+		byVersion += fmt.Sprintf("%s:%d", truncateStr(ver, 8), n)
+	}
+	if byVersion == "" {
+		byVersion = "-"
+	}
+
+	metrics2 := "CONSUMPTION:\n"
+	metrics2 += fmt.Sprintf("Tenants:  %s\n", byTenant)
+	metrics2 += fmt.Sprintf("Versions: %s\n", byVersion)
+	metrics2 += "RPS/route: "
+	routes := make([]string, 0, len(rpsByRoute))
+	for r := range rpsByRoute {
+		routes = append(routes, r)
+	}
+	sort.Strings(routes)
+	for i, r := range routes {
+		if i > 0 {
+			metrics2 += ", "
+		}
+		metrics2 += fmt.Sprintf("%s:%.1f", truncateStr(r, 10), rpsByRoute[r])
+	}
+	if len(routes) == 0 {
+		metrics2 += "-"
+	}
+
+	cardsRow1 := lipgloss.JoinHorizontal(lipgloss.Top,
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("SERVICES"), health)),
 		cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("METRICS"), metrics)),
 	)
+	cardsRow2 := cardStyle.Render(fmt.Sprintf("%s\n\n%s", dashboardTitleStyle.Render("USAGE"), metrics2))
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("HEALTH"),
 		"",
-		cardsRow,
+		cardsRow1,
+		"",
+		cardsRow2,
 	)
+}
+
+func truncateStr(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 func (m Model) View() string {

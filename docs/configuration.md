@@ -51,6 +51,15 @@ products:
 - `slug`: Unique identifier for the product (used in subscriptions).
 - `path_prefix`: URL path prefix; requests starting with this path are routed to the given backend.
 - `target_url`: Backend base URL for that API.
+- `host`: Optional. When set, the request `Host` header must match (e.g. `api.example.com`). Enables routing by domain; leave empty or use `*` for path-only matching.
+- `add_headers`: Optional. Map of header names to values added to every request sent to this backend (e.g. `X-Backend-Version: "v1"`, `X-Source: apimcore`). Useful for multi-tenant or backend identification.
+- `strip_path_prefix`: Optional. When `true`, the path prefix is removed before forwarding. Example: request `/api/v1/users` with `path_prefix: "/api/v1"` is sent to the backend as `/users`. Default: `false` (path is forwarded as-is).
+
+## Host and path routing
+
+You can route by **host** (domain) and **path** together. Point DNS for your domains to the server where ApimCore runs; set the gateway to listen on port 80 (or put a reverse proxy in front). Each API entry can specify `host` and `path_prefix`. Matching order: the gateway tries host+path first, then path only. Define more specific paths before broader ones (e.g. `/landingpage` before `/`).
+
+**Example:** `api.mydomain.com` to app A:5000, `mydomain.com/landingpage` to app C:8081, `mydomain.com/` to app B:8080. Full config: [examples/domain_routing.yaml](examples/domain_routing.yaml).
 
 ## Subscriptions and API keys
 
@@ -60,6 +69,7 @@ Access to products is granted via **subscriptions** and **keys**. Clients send a
 subscriptions:
   - developer_id: "default-dev"
     product_slug: "edu"
+    tenant_id: "tenant-001"
     plan: "premium"
     keys:
       - name: "Default Key"
@@ -67,6 +77,7 @@ subscriptions:
 ```
 
 - `product_slug`: Must match a product `slug`.
+- `tenant_id`: Optional. When set, the gateway adds the header `X-Tenant-Id` with this value on every request to the backend. Use it when your backends are multi-tenant and identify the tenant by this header.
 - `keys[].value`: Secret sent by the client in `X-Api-Key`. Validate and protect these like passwords.
 
 ## Security
@@ -139,5 +150,6 @@ Ready-to-use examples are in [docs/examples](examples/):
 - [security.yaml](examples/security.yaml): Stricter rate limits and IP protection.
 - [multi_tenant.yaml](examples/multi_tenant.yaml): Multiple products and tenants.
 - [geo_fencing.yaml](examples/geo_fencing.yaml): Regional access control.
+- [domain_routing.yaml](examples/domain_routing.yaml): One gateway, multiple domains and paths (api.mydomain.com, mydomain.com, mydomain.com/landingpage).
 
 Copy one and adapt paths, backends, and keys to your environment.

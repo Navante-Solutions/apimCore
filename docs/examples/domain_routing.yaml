@@ -1,0 +1,52 @@
+# Domain and path routing: one gateway, multiple domains and backends
+#
+# Scenario:
+#   - api.mydomain.com    -> Application A (API) on port 5000, path /api/v1
+#   - mydomain.com/       -> Application B (main site) on port 8080
+#   - mydomain.com/landingpage -> Application C (landing) on port 8081
+#
+# DNS: api.mydomain.com and mydomain.com point to this server's IP.
+# Gateway: listen on :80 (or put nginx/Caddy in front for HTTPS and proxy to :80).
+
+gateway:
+  listen: ":80"
+  backend_timeout_seconds: 30
+
+server:
+  listen: ":8081"
+
+products:
+  - name: "API Domain"
+    slug: "api-domain"
+    description: "API subdomain routes to backend A"
+    apis:
+      - name: "App A - API"
+        host: "api.mydomain.com"
+        path_prefix: "/api/v1"
+        target_url: "http://localhost:5000"
+
+  - name: "Main Domain"
+    slug: "main-domain"
+    description: "mydomain.com: /landingpage -> C, everything else -> B"
+    apis:
+      - name: "App C - Landing"
+        host: "mydomain.com"
+        path_prefix: "/landingpage"
+        target_url: "http://localhost:8081"
+      - name: "App B - Main site"
+        host: "mydomain.com"
+        path_prefix: "/"
+        target_url: "http://localhost:8080"
+
+subscriptions: []
+
+security:
+  ip_blacklist: []
+  rate_limit:
+    enabled: true
+    requests_per_second: 10
+    burst: 20
+
+devportal:
+  enabled: false
+  path: "/devportal"

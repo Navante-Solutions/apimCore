@@ -1,0 +1,29 @@
+# Headers and path rewrite: tenant_id, add_headers, strip_path_prefix
+products:
+  - name: "Tenant API"
+    slug: "tenant-api"
+    apis:
+      - name: "Backend v1"
+        path_prefix: "/api/v1"
+        target_url: "http://backend:8000"
+        strip_path_prefix: true
+        add_headers:
+          X-Backend-Version: "v1"
+          X-Source: "apimcore"
+
+subscriptions:
+  - developer_id: "tenant-a"
+    product_slug: "tenant-api"
+    tenant_id: "tenant-001"
+    plan: "Pro"
+    keys:
+      - name: "Tenant A Key"
+        value: "key-tenant-a"
+
+  - developer_id: "tenant-b"
+    product_slug: "tenant-api"
+    tenant_id: "tenant-002"
+    plan: "Pro"
+    keys:
+      - name: "Tenant B Key"
+        value: "key-tenant-b"

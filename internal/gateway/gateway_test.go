@@ -130,7 +130,7 @@ func TestGateway_ServeHTTP(t *testing.T) {
 	t.Run("Rate Limiting", func(t *testing.T) {
 		cfg.Security.RateLimit = config.RateLimitConfig{
 			Enabled: true,
-			RPP:     100, // Higher limit for testing other things if needed
+			RPS:     100,
 			Burst:   100,
 		}
 		gw.UpdateConfig(cfg)
@@ -148,7 +148,7 @@ func TestGateway_ServeHTTP(t *testing.T) {
 		// Now force a 429 with tight limits
 		cfg.Security.RateLimit = config.RateLimitConfig{
 			Enabled: true,
-			RPP:     0.1,
+			RPS:     0.1,
 			Burst:   1,
 		}
 		gw.UpdateConfig(cfg)
