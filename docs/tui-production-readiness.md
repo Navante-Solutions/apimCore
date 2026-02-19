@@ -13,7 +13,7 @@ This document lists current mocks and placeholders in the TUI and gateway pipeli
 - In the meter, expose a function that computes average latency from usage (e.g. `AvgLatencySince(since time.Time) float64`). The store already records `ResponseTimeMs` in `RequestUsage`; aggregate in a time window (e.g. last hour).
 - In the metrics ticker in `main.go`, call that function and set `AvgLatency` (in ms) in `MetricsUpdateMsg` and `hub.SystemStats`.
 
-**Relevant:** `internal/meter/meter.go`, `internal/store/store.go`, `cmd/apim/main.go`.
+**Relevant:** `internal/meter/meter.go`, `internal/store/store.go`, `cmd/apimcore/main.go`.
 
 ---
 
@@ -32,7 +32,7 @@ This document lists current mocks and placeholders in the TUI and gateway pipeli
 - In the gateway, when responding with 429 (rate limit) or 403 (blacklist/geo), call `Hub.PublishTraffic` with a `TrafficEvent` with the appropriate status and action (e.g. "RATE_LIMIT", "BLOCKED"). Maintain in-memory counters (e.g. atomic or sync) and include them in `SystemStats` (either from the gateway or an aggregator).
 - Alternatively, aggregate from traffic events in the TUI or a central component over a time window and feed into `SystemStats`.
 
-**Relevant:** `internal/gateway/gateway.go`, `internal/gateway/security.go`, `internal/hub/hub.go`, `cmd/apim/main.go`.
+**Relevant:** `internal/gateway/gateway.go`, `internal/gateway/security.go`, `internal/hub/hub.go`, `cmd/apimcore/main.go`.
 
 ---
 
@@ -46,7 +46,7 @@ This document lists current mocks and placeholders in the TUI and gateway pipeli
 - **NODES:** For single-node, show "1" or "N/A". For multi-node, use a config or cluster API (e.g. `APIM_CLUSTER_NODES`); until then, show "1" or "single node".
 - Pass these values into the TUI model from `main.go` (config or env).
 
-**Relevant:** `config/config.go`, `cmd/apim/main.go`, `internal/tui/tui.go`.
+**Relevant:** `config/config.go`, `cmd/apimcore/main.go`, `internal/tui/tui.go`.
 
 ---
 
@@ -59,7 +59,7 @@ This document lists current mocks and placeholders in the TUI and gateway pipeli
 - Keep a rolling buffer in the TUI model (e.g. request count per minute, last N points). Each tick, append the count for the last interval and trim to cap.
 - Either the meter/store exposes "requests per interval for last N intervals", or the main ticker sends "requests in last interval" and the TUI builds the series.
 
-**Relevant:** `internal/tui/tui.go`, `cmd/apim/main.go`.
+**Relevant:** `internal/tui/tui.go`, `cmd/apimcore/main.go`.
 
 ---
 
@@ -72,7 +72,7 @@ This document lists current mocks and placeholders in the TUI and gateway pipeli
 - Pass the actual config path into the TUI model (e.g. `ConfigPath`) and display "Loaded from: " + path (or "default: config.yaml" if empty).
 - For production: either keep view-only with text like "View-only. Edit file and press [R] to reload.", or design a safe in-app edit flow.
 
-**Relevant:** `internal/tui/tui.go`, `cmd/apim/main.go`.
+**Relevant:** `internal/tui/tui.go`, `cmd/apimcore/main.go`.
 
 ---
 

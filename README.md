@@ -42,7 +42,7 @@ Download the latest release for your platform from [Releases](https://github.com
 ```bash
 git clone https://github.com/Navante-Solutions/apimCore.git
 cd apimCore
-go build -o apimcore ./cmd/apim
+go build -o apimcore ./cmd/apimcore
 ./apimcore -f config.yaml --tui
 ```
 

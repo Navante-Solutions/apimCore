@@ -1,5 +1,5 @@
 version: 2
 
 builds:
-  - main: ./cmd/apim
+  - main: ./cmd/apimcore
     binary: apimcore

@@ -30,7 +30,7 @@ This guide walks you through installing and running ApimCore. For configuration 
 2. Download dependencies and build:
    ```bash
    go mod tidy
-   go build -o apimcore ./cmd/apim
+   go build -o apimcore ./cmd/apimcore
    ```
 
 3. Run with your config and optional TUI:

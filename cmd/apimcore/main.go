@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -38,16 +39,13 @@ OPTIONS
   -f, -config PATH     Config file path. Default: config.yaml, or APIM_CONFIG env.
   -tui                 Start the interactive TUI (traffic, geo, config, system).
   -hot-reload          Watch config file and reload on change. Without this, use [R] in TUI or restart to apply changes.
-  -security-log VALUE Persistence for BLOCKED/RATE_LIMIT events:
-                       off              Disable (no log).
-                       PATH             JSONL file (e.g. apim-security.jsonl).
-                       sqlite:PATH      SQLite database (e.g. sqlite:apim-security.db).
-                       Default from APIM_SECURITY_LOG, or apim-security.jsonl.
-  -h, -help            Show this help and exit.
+  -use-db               Persist BLOCKED/RATE_LIMIT events to SQLite at ./data/apimcore.db (creates dir if needed).
+  -use-file-log PATH    Persist BLOCKED/RATE_LIMIT events to a JSONL file at PATH. Ignored if -use-db is set.
+  -h, -help             Show this help and exit.
 
 ENVIRONMENT
   APIM_CONFIG          Config file path when -f is not set.
-  APIM_SECURITY_LOG     Security log target (off, path, or sqlite:path) when -security-log is not set.
+  APIM_FILE_LOG        Path to JSONL file when -use-file-log is not set (same as -use-file-log).
   APIM_GATEWAY_LISTEN   Override gateway.listen from config.
   APIM_SERVER_LISTEN    Override server.listen from config.
 
@@ -56,8 +54,9 @@ EXAMPLES
   apimcore -f ./config/prod.yaml
   apimcore --tui
   apimcore -f config.yaml -tui -hot-reload
-  apimcore -security-log=off --tui
-  apimcore -security-log=sqlite:./data/security.db
+  apimcore -use-db
+  apimcore -use-db --tui
+  apimcore -use-file-log=apim-security.jsonl --tui
 
 DOCUMENTATION
   See docs/ for configuration, deployment, and architecture.
@@ -93,7 +92,8 @@ func main() {
 	flag.StringVar(&configPath, "config", "", "Path to config file (same as -f)")
 	hotReload := flag.Bool("hot-reload", false, "Watch config file and reload on change (use [R] in TUI for manual reload)")
 	useTUI := flag.Bool("tui", false, "Enable interactive TUI monitor")
-	securityLogFlag := flag.String("security-log", "", "Security event log: off, <path> (JSONL file), or sqlite:<path> (default from APIM_SECURITY_LOG or apim-security.jsonl)")
+	useDB := flag.Bool("use-db", false, "Persist security events to SQLite at ./data/apimcore.db")
+	useFileLog := flag.String("use-file-log", "", "Persist security events to JSONL file at PATH (ignored if -use-db)")
 	flag.Parse()
 
 	if configPath == "" {
@@ -125,15 +125,20 @@ func main() {
 	hb := hub.NewBroadcaster()
 	gw := gateway.New(cfg, st, m, hb)
 
-	securityLogPath := *securityLogFlag
-	if securityLogPath == "" {
-		securityLogPath = os.Getenv("APIM_SECURITY_LOG")
-	}
-	if securityLogPath == "" {
-		securityLogPath = "apim-security.jsonl"
-	}
-	if securityLogPath == "off" || securityLogPath == "false" {
-		securityLogPath = ""
+	securityLogPath := ""
+	if *useDB {
+		dbPath := "data/apimcore.db"
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+			log.Printf("could not create data dir for -use-db: %v", err)
+			securityLogPath = ""
+		} else {
+			securityLogPath = "sqlite:" + dbPath
+		}
+	} else {
+		securityLogPath = *useFileLog
+		if securityLogPath == "" {
+			securityLogPath = os.Getenv("APIM_FILE_LOG")
+		}
 	}
 	secLog, err := securitylog.New(securityLogPath)
 	if err != nil {

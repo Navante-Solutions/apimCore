@@ -1,7 +1,7 @@
 .PHONY: build test lint docker run clean
 
 BINARY := apimcore
-MAIN   := ./cmd/apim
+MAIN   := ./cmd/apimcore
 
 build:
 	go build -ldflags="-s -w" -o $(BINARY) $(MAIN)

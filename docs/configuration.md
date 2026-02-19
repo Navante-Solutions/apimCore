@@ -117,18 +117,19 @@ No restart is required when hot-reload is enabled. Use it to add products, APIs,
 | `APIM_CONFIG` | Same as `-f` when the flag is not set (default: `config.yaml`). |
 | `APIM_GATEWAY_LISTEN` | Override `gateway.listen`. |
 | `APIM_SERVER_LISTEN` | Override `server.listen`. |
-| `APIM_SECURITY_LOG` | Security log target. Default: `apim-security.jsonl`. See [Security event log](#security-event-log). Set to `off` or `false` to disable. |
-| `-security-log` | Overrides `APIM_SECURITY_LOG`. Use to enable/disable or switch backend without changing env. |
+| `-use-db` | Persist BLOCKED/RATE_LIMIT events to SQLite at `data/apimcore.db` (creates `data/` if needed). |
+| `-use-file-log PATH` | Persist to a JSONL file at PATH. Ignored if `-use-db` is set. |
+| `APIM_FILE_LOG` | Path to JSONL file when `-use-file-log` is not set. |
 
 ## Security event log
 
-You can persist BLOCKED and RATE_LIMIT events or run without persistence.
+By default there is **no persistence**: events stay in memory only and are lost when the process exits.
 
-- **Off**: Set `-security-log=off` or `APIM_SECURITY_LOG=off` (or `false`). No events are written; same behavior as before the feature existed.
-- **File (JSONL)**: Set path to a file (e.g. `apim-security.jsonl` or `-security-log=/var/log/apim/security.jsonl`). One JSON object per line; fields: `time`, `action`, `ip`, `country`, `method`, `path`, `status`, `tenant_id`. Good for log shippers and simple inspection.
-- **SQLite**: Set `sqlite:<path>` (e.g. `APIM_SECURITY_LOG=sqlite:apim-security.db` or `-security-log=sqlite:./data/security.db`). Events are stored in a table; you can query by time, IP, action, or country. Same async, non-blocking writer as the file backend.
+- **Default**: No persistence (no flag = no file, no DB).
+- **`-use-db`**: SQLite at `data/apimcore.db`. The `data/` directory is created if needed.
+- **`-use-file-log=<path>`** (or **`APIM_FILE_LOG`**): JSONL file at the given path.
 
-Priority: `-security-log` flag, then `APIM_SECURITY_LOG`, then default `apim-security.jsonl`. If the value is `off` or `false`, persistence is disabled.
+When both `-use-db` and `-use-file-log` are set, `-use-db` wins.
 
 ## Example configs
 
