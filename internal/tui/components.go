@@ -8,20 +8,6 @@ import (
 )
 
 var (
-	tabStyle = lipgloss.NewStyle().
-			Padding(0, 2).
-			Foreground(lipgloss.Color("252")).
-			Background(lipgloss.Color("235"))
-
-	activeTabStyle = tabStyle.
-			Background(lipgloss.Color("#7D56F4")).
-			Foreground(lipgloss.Color("255")).
-			Bold(true)
-
-	tabBarStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("235")).
-			MarginBottom(1)
-
 	brailleMapStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#252525")). // Dark base
 			Bold(true)
@@ -67,31 +53,16 @@ func (m Model) renderGlobalMap() string {
 	return res
 }
 
-func (m Model) renderTabs() string {
-	tabs := []string{"GLOBAL", "DASHBOARD", "TRAFFIC", "ADMIN", "SECURITY", "HEALTH", "CONFIG", "PORTAL"}
-	var renderedTabs []string
-
-	for i, t := range tabs {
-		style := tabStyle
-		if int(m.Mode) == i {
-			style = activeTabStyle
-		}
-		renderedTabs = append(renderedTabs, style.Render(fmt.Sprintf("F%d %s", i+2, t)))
-	}
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
-}
-
 func (m Model) renderHeader(uptime string) string {
 	width := m.TermWidth
 	if width < 1 {
 		width = 80
 	}
-	
+
 	leftWidth := width / 3
 	middleWidth := width / 3
 	rightWidth := width - leftWidth - middleWidth
-	
+
 	if leftWidth < 20 {
 		leftWidth = 20
 		middleWidth = (width - leftWidth) / 2
@@ -111,7 +82,7 @@ func (m Model) renderHeader(uptime string) string {
 		headerLabelStyle.Render("Uptime:  ")+infoStyle.Render(uptime),
 		headerLabelStyle.Render("Requests: ")+infoStyle.Render(fmt.Sprintf("%d", m.TotalRequests)),
 	)
-	
+
 	middleContent := lipgloss.JoinVertical(lipgloss.Left,
 		headerLabelStyle.Render("Latency:  ")+infoStyle.Render(fmt.Sprintf("%.2fms", m.AvgLatency)),
 		headerLabelStyle.Render("Status:   ")+specialStyle.Render("RUNNING"),
@@ -129,9 +100,9 @@ func (m Model) renderHeader(uptime string) string {
 	leftRendered := lipgloss.NewStyle().Width(leftWidth).MaxWidth(leftWidth).Render(leftContent)
 	middleRendered := lipgloss.NewStyle().Width(middleWidth).MaxWidth(middleWidth).Render(middleContent)
 	rightRendered := lipgloss.NewStyle().Width(rightWidth).MaxWidth(rightWidth).Render(rightContent)
-	
+
 	headerContent := lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, middleRendered, rightRendered)
-	
+
 	return headerStyle.Width(width).MaxWidth(width).Render(headerContent)
 }
 
@@ -154,7 +125,7 @@ func (m Model) renderFooter() string {
 	}
 
 	items := []struct {
-		key string
+		key   string
 		label string
 	}{
 		{"F2", "Global"},

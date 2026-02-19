@@ -57,16 +57,13 @@ func (g *Gateway) IPBlacklistMiddleware() Middleware {
 func (g *Gateway) GeoIPMiddleware() Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Mock logic: local IPs are "Home", 8.8.8.8 is "US", others are "Unknown"
 			remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-			country := "Unknown"
-
+			var country string
 			if remoteIP == "127.0.0.1" || remoteIP == "::1" {
 				country = "Local"
 			} else if remoteIP == "8.8.8.8" {
 				country = "US"
 			} else {
-				// Random-ish country for demo
 				if len(remoteIP)%2 == 0 {
 					country = "BR"
 				} else {

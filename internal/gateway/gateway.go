@@ -38,18 +38,18 @@ type TrafficPacket struct {
 }
 
 type Gateway struct {
-	mu      sync.RWMutex
-	config  *config.Config
-	store   *store.Store
-	meter   *meter.Meter
-	proxy   *httputil.ReverseProxy
-	handler http.Handler
-	Hub     *hub.Broadcaster
-	securityMu    sync.Mutex
-	blacklist     map[string]bool
-	blacknets     []*net.IPNet
-	allowedGeo    map[string]bool
-	blockedCount  int64
+	mu               sync.RWMutex
+	config           *config.Config
+	store            *store.Store
+	meter            *meter.Meter
+	proxy            *httputil.ReverseProxy
+	handler          http.Handler
+	Hub              *hub.Broadcaster
+	securityMu       sync.Mutex
+	blacklist        map[string]bool
+	blacknets        []*net.IPNet
+	allowedGeo       map[string]bool
+	blockedCount     int64
 	rateLimitedCount int64
 }
 

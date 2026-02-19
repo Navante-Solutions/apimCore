@@ -52,11 +52,6 @@ var (
 			Foreground(lipgloss.Color("#04B575")).
 			Bold(true)
 
-	statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAFAFA")).
-			Background(lipgloss.Color("#353535")).
-			Padding(0, 1)
-
 	footerKeyStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#000000")).
 			Background(lipgloss.Color("#AAAAAA")).
@@ -66,12 +61,6 @@ var (
 				Foreground(lipgloss.Color("#FAFAFA")).
 				Background(lipgloss.Color("#7D56F4")).
 				Padding(0, 1)
-
-	menuStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#7D56F4")).
-			Padding(1).
-			Width(40)
 
 	headerStyle = lipgloss.NewStyle().
 			MarginBottom(1).
@@ -117,14 +106,14 @@ type TrafficPacket = hub.TrafficEvent
 const sparklineHistoryLen = 20
 
 type Model struct {
-	TermWidth   int
-	TermHeight  int
-	Ready       bool
-	OnReload    func()
-	Store       *store.Store
-	Gateway     *gateway.Gateway
-	ConfigPath  string
-	NodeID      string
+	TermWidth    int
+	TermHeight   int
+	Ready        bool
+	OnReload     func()
+	Store        *store.Store
+	Gateway      *gateway.Gateway
+	ConfigPath   string
+	NodeID       string
 	ClusterNodes string
 
 	Uptime        time.Time
@@ -181,24 +170,24 @@ func NewModel(onReload func(), s *store.Store, g *gateway.Gateway, h *hub.Broadc
 	t.SetStyles(tableStyles)
 
 	return Model{
-		Uptime:             time.Now(),
-		OnReload:           onReload,
-		Store:              s,
-		Gateway:            g,
-		Hub:                h,
-		ConfigPath:         configPath,
-		NodeID:             nodeID,
-		ClusterNodes:       clusterNodes,
-		TrafficTable:       t,
-		Mode:               ViewDashboard,
-		Logs:               []string{},
-		Alerts:             []Alert{},
-		Traffic:            []hub.TrafficEvent{},
+		Uptime:              time.Now(),
+		OnReload:            onReload,
+		Store:               s,
+		Gateway:             g,
+		Hub:                 h,
+		ConfigPath:          configPath,
+		NodeID:              nodeID,
+		ClusterNodes:        clusterNodes,
+		TrafficTable:        t,
+		Mode:                ViewDashboard,
+		Logs:                []string{},
+		Alerts:              []Alert{},
+		Traffic:             []hub.TrafficEvent{},
 		RequestCountHistory: []int64{},
-		Progress:           progress.New(progress.WithDefaultGradient()),
-		TermWidth:          80,
-		TermHeight:         24,
-		Ready:              false,
+		Progress:            progress.New(progress.WithDefaultGradient()),
+		TermWidth:           80,
+		TermHeight:          24,
+		Ready:               false,
 	}
 }
 
@@ -254,6 +243,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "down":
 			if m.Mode == ViewTraffic && m.SelectedPacket == nil {
 				m.TrafficTable, cmd = m.TrafficTable.Update(msg)
+				cmds = append(cmds, cmd)
+				return m, tea.Batch(cmds...)
 			}
 		case "enter":
 			if m.Mode == ViewTraffic && m.SelectedPacket == nil {
@@ -593,10 +584,10 @@ func (m Model) configView() string {
 		Width(bodyWidth - 2).
 		MaxWidth(bodyWidth - 2)
 	path := m.ConfigPath
-		if path == "" {
-			path = "config.yaml"
-		}
-		content := fmt.Sprintf("Loaded from: %s\n\nView-only. Edit file and press [R] to reload.", path)
+	if path == "" {
+		path = "config.yaml"
+	}
+	content := fmt.Sprintf("Loaded from: %s\n\nView-only. Edit file and press [R] to reload.", path)
 	boxContent := boxStyle.Render(dashboardTitleStyle.Render("LIVE CONFIGURATION (YAML)") + "\n\n" + content)
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("CONFIG"),
@@ -617,19 +608,19 @@ func (m Model) portalView() string {
 		Width(bodyWidth - 2).
 		MaxWidth(bodyWidth - 2)
 	defs := m.Store.ListDefinitions()
-		pubCount := 0
-		withSpec := 0
-		for _, d := range defs {
-			pubCount++
-			if d.OpenAPISpecURL != "" {
-				withSpec++
-			}
+	pubCount := 0
+	withSpec := 0
+	for _, d := range defs {
+		pubCount++
+		if d.OpenAPISpecURL != "" {
+			withSpec++
 		}
-		docPct := "N/A"
-		if pubCount > 0 {
-			docPct = fmt.Sprintf("%d%%", (withSpec*100)/pubCount)
-		}
-		content := fmt.Sprintf("Public APIs: %d\nDocumentation: %s\nStatus: %s", pubCount, docPct, specialStyle.Render("LIVE"))
+	}
+	docPct := "N/A"
+	if pubCount > 0 {
+		docPct = fmt.Sprintf("%d%%", (withSpec*100)/pubCount)
+	}
+	content := fmt.Sprintf("Public APIs: %d\nDocumentation: %s\nStatus: %s", pubCount, docPct, specialStyle.Render("LIVE"))
 	boxContent := boxStyle.Render(dashboardTitleStyle.Render("DEVELOPER PORTAL") + "\n\n" + content)
 	return lipgloss.JoinVertical(lipgloss.Left,
 		dashboardTitleStyle.Render("PORTAL"),

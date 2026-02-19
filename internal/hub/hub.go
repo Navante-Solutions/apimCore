@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"sync"
 	"time"
 )
 
@@ -39,7 +38,6 @@ type TrafficEvent struct {
 
 // Broadcaster manages telemetry distribution
 type Broadcaster struct {
-	mu          sync.RWMutex
 	trafficChan chan TrafficEvent
 	statsChan   chan SystemStats
 	stopChan    chan struct{}
