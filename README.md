@@ -26,9 +26,39 @@ ApimCore is a lightweight, high-performance API gateway written in Go. It provid
 
 ## Quick start
 
-### Using the binary (recommended)
+### Using installers (recommended)
 
-Download the latest release for your platform from [Releases](https://github.com/Navante-Solutions/apimCore/releases), then:
+Installers are automatically generated for each release:
+
+- **Linux (Ubuntu/Debian)**: `.deb` packages for x86_64 and ARM64
+- **Linux (RedHat/Fedora)**: `.rpm` packages for x86_64 and ARM64
+- **Windows**: `.exe` installers for x86_64, x86, and ARM64
+- **macOS**: `.tar.gz` archives for x86_64 and ARM64
+
+Download the appropriate installer from [Releases](https://github.com/Navante-Solutions/apimCore/releases):
+
+**Linux (.deb):**
+```bash
+sudo dpkg -i apimcore_*.deb
+```
+
+**Linux (.rpm):**
+```bash
+sudo rpm -i apimcore_*.rpm
+```
+
+**Windows:**
+Run the `.exe` installer and follow the setup wizard.
+
+**macOS:**
+```bash
+tar -xzf apimcore_*_darwin_*.tar.gz
+sudo mv apimcore /usr/local/bin/
+```
+
+### Using the binary
+
+Download the latest release binary for your platform from [Releases](https://github.com/Navante-Solutions/apimCore/releases), then:
 
 ```bash
 ./apimcore -f config.yaml --tui

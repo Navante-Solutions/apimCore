@@ -21,6 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -28,22 +29,22 @@ jobs:
       
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@v0
-      # More assembly might be required: Docker logins, GPG, etc.
-      # It all depends on your needs.
+      
+      - name: Install dependencies for installers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+      
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          # either 'goreleaser' (default) or 'goreleaser-pro'
           distribution: goreleaser
-          # 'latest', 'nightly', or a semver
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Attest Build Provenance
-        # Attestations are only available for public repos or paid plans.
-        # Skip this step when the feature is not available so releases still succeed.
         if: ${{ github.event.repository.visibility == 'public' }}
         uses: actions/attest-build-provenance@v1
         with:

@@ -1,5 +1,100 @@
 version: 2
 
+project_name: apimcore
+
 builds:
-  - main: ./cmd/apimcore
+  - id: apimcore
+    main: ./cmd/apimcore
     binary: apimcore
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - 386
+    goarm:
+      - "6"
+      - "7"
+    ignore:
+      - goos: darwin
+        goarch: 386
+      - goos: windows
+        goarch: arm64
+        goarm: "6"
+      - goos: windows
+        goarch: arm64
+        goarm: "7"
+
+nfpms:
+  - id: linux-packages
+    package_name: apimcore
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    vendor: Navante Solutions
+    homepage: https://github.com/Navante-Solutions/apimCore
+    maintainer: Navante Solutions <support@navante.com>
+    description: Lightweight, high-performance API gateway with key-based access control, rate limiting, and TUI monitoring.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    builds:
+      - apimcore
+    files:
+      "{{ .Binary }}": /usr/bin/apimcore
+    empty_folders:
+      - /etc/apimcore
+      - /var/lib/apimcore
+    scripts:
+      postinstall: |
+        #!/bin/sh
+        systemctl daemon-reload || true
+      preremove: |
+        #!/bin/sh
+        systemctl stop apimcore || true
+    overrides:
+      deb:
+        depends:
+          - ca-certificates
+      rpm:
+        depends:
+          - ca-certificates
+
+nsis:
+  - id: windows-installer
+    package_name: ApimCore
+    name_template: "{{ .ProjectName }}_Setup_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    description: ApimCore API Gateway Installer
+    license: LICENSE
+    homepage: https://github.com/Navante-Solutions/apimCore
+    maintainer: Navante Solutions
+    install_dir: C:\Program Files\ApimCore
+    compression: lzma
+    languages:
+      - English
+    builds:
+      - apimcore
+    files:
+      "{{ .Binary }}": "{{ .ProjectName }}.exe"
+    hooks:
+      pre_install: |
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ApimCore" "DisplayName" "ApimCore API Gateway"
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ApimCore" "Publisher" "Navante Solutions"
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ApimCore" "DisplayVersion" "{{ .Version }}"
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ApimCore" "UninstallString" "$INSTDIR\uninstall.exe"
+      post_install: |
+        CreateShortcut "$DESKTOP\ApimCore.lnk" "$INSTDIR\{{ .ProjectName }}.exe"
+        CreateShortcut "$SMPROGRAMS\ApimCore\ApimCore.lnk" "$INSTDIR\{{ .ProjectName }}.exe"
+      pre_uninstall: |
+        Delete "$DESKTOP\ApimCore.lnk"
+        Delete "$SMPROGRAMS\ApimCore\ApimCore.lnk"
+        RMDir "$SMPROGRAMS\ApimCore"
+    overrides:
+      windows/amd64:
+        install_dir: C:\Program Files\ApimCore
+      windows/386:
+        install_dir: C:\Program Files (x86)\ApimCore
+      windows/arm64:
+        install_dir: C:\Program Files\ApimCore
