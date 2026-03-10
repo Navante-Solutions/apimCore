@@ -55,11 +55,11 @@ func (t *measuringTransport) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 const (
-	HeaderAPIKey    = "X-Api-Key"
-	HeaderTenantID  = "X-Tenant-Id"
-	HeaderRequestID = "X-Request-Id"
-	HeaderGeoCountry = "X-Geo-Country"
-	KeyPrefixLen     = 8
+	HeaderAPIKey          = "X-Api-Key"
+	HeaderTenantID        = "X-Tenant-Id"
+	HeaderRequestID       = "X-Request-Id"
+	HeaderGeoCountry      = "X-Geo-Country"
+	KeyPrefixLen          = 8
 	RateLimiterMapMaxSize = 100_000
 )
 
@@ -211,6 +211,9 @@ func (g *Gateway) rebuildHandler() {
 
 	// Always add GeoIP (handles Geo-fencing too)
 	middlewares = append(middlewares, g.GeoIPMiddleware())
+
+	// Add JWT Validation
+	middlewares = append(middlewares, g.JWTMiddleware())
 
 	g.handler = Chain(base, middlewares...)
 }
