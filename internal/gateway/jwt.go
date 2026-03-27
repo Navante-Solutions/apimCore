@@ -21,13 +21,8 @@ func (g *Gateway) JWTMiddleware() Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-				// If no JWT, fall back to API Key or reject if required
-				// For now, we allow fallback to API Key if present
-				if r.Header.Get(HeaderAPIKey) != "" {
-					next.ServeHTTP(w, r)
-					return
-				}
-				http.Error(w, "Unauthorized: Missing Token", http.StatusUnauthorized)
+				// No JWT present; pass through to let API key or open-access routing handle the request.
+				next.ServeHTTP(w, r)
 				return
 			}
 
